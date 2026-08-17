@@ -4,9 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>مكتبتي الجيمرية</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="theme-color" content="#0b0d17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="مكتبتي">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
-<style>html,body,#root{height:100%;margin:0;background:#07080e;}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:#0a0c14}::-webkit-scrollbar-thumb{background:#2a2f47;border-radius:9px;border:2px solid #0a0c14}::-webkit-scrollbar-thumb:hover{background:#3d4463}</style>
+<script src="games_db.js"></script>
+<style>html,body,#root{height:100%;margin:0;background:#07080e;}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:#0a0c14}::-webkit-scrollbar-thumb{background:#2a2f47;border-radius:9px;border:2px solid #0a0c14}::-webkit-scrollbar-thumb:hover{background:#3d4463}
+    .card-sel-mode { cursor: pointer; transition: 0.2s; }
+    .card-sel-mode:not(.card-selected) { opacity: 0.6; transform: scale(0.96); }
+    .card-selected { border: 2px solid #4ade80 !important; transform: scale(1.02); z-index: 10; box-shadow: 0 4px 15px rgba(74, 222, 128, 0.4); }
+    .sel-check { position: absolute; top: 10px; right: 10px; font-size: 24px; z-index: 20; background: rgba(0,0,0,0.5); border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+    .bulk-bar { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--bg); border: 1px solid var(--bd); padding: 10px 20px; border-radius: 20px; z-index: 1000; display: flex; gap: 15px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+</style>
+
 </head>
 <body>
 <div id="root"></div>
@@ -300,6 +315,35 @@ const colorOf = plat => FAMILIES[familyOf(plat)].color;
 const glowOf = plat => FAMILIES[familyOf(plat)].glow;
 const uniq = arr => Array.from(new Set(arr.filter(x => x !== "" && x != null)));
 
+/* ---------- قاعدة الألعاب المحلية (games_db.js) — للبحث الفوري عند الإضافة ----------
+   كل سجل: [name, platform, year, genre, developer, criticScore] */
+const eraOf = plat => PLAT_MAP[plat] ? PLAT_MAP[plat].era : 0;
+const isRetroPlatform = plat => { const e = eraOf(plat); return e >= 1 && e <= 7; };
+const GAMES_DB_BY_PLATFORM = (() => {
+  const m = new Map();
+  const db = (typeof GAMES_DB !== "undefined" && Array.isArray(GAMES_DB)) ? GAMES_DB : [];
+  for (const r of db) {
+    const plat = r[1];
+    if (!m.has(plat)) m.set(plat, []);
+    m.get(plat).push(r);
+  }
+  return m;
+})();
+function searchLocalGames(platform, query, limit) {
+  const list = GAMES_DB_BY_PLATFORM.get(platform);
+  if (!list || !list.length) return [];
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return [];
+  const starts = [], has = [];
+  for (const r of list) {
+    const n = r[0].toLowerCase();
+    if (n.startsWith(q)) starts.push(r);
+    else if (n.includes(q)) has.push(r);
+    if (starts.length >= (limit || 30)) break;
+  }
+  return starts.concat(has).slice(0, limit || 30);
+}
+
 /* ---------- الحالات والأنواع ---------- */
 const STATUSES = {
   completed: {
@@ -331,8 +375,6 @@ const STATUSES = {
 const STATUS_ORDER = ["completed", "playing", "library", "shelved", "backlog"];
 const SOURCES = ["Steam", "GOG", "Epic", "Xbox / Game Pass", "PSN", "Nintendo eShop", "أخرى"];
 
-/* ---------- المكتبة الأساسية (الديسك) ---------- */
-const SEED = [["Assassin's Creed III Remastered", "Nintendo Switch", "", "", "", true], ["Assassin's Creed Unity", "Xbox One", "Action", 2014, "Ubisoft Montreal", false], ["Astro Bot", "PlayStation 5", "", "", "", false], ["Bayonetta 3", "Nintendo Switch", "", "", "", false], ["Crash Bandicoot 4: It's About Time", "Xbox One", "Platformer", 2020, "Toys for Bob", false], ["Crash Bandicoot: The Wrath of Cortex", "Xbox (الأصلي)", "Platformer", 2001, "Traveller's Tales", false], ["Crash Twinsanity", "Xbox (الأصلي)", "Platformer", 2004, "Traveller's Tales", false], ["Death Stranding 2: On the Beach", "PlayStation 5", "", "", "", false], ["Donkey Kong Bananza", "Nintendo Switch 2", "", "", "", false], ["Donkey Kong Country: Tropical Freeze", "Nintendo Switch", "", "", "", false], ["Doom 3", "Xbox (الأصلي)", "FPS", 2005, "Vicarious Visions", false], ["Far Cry 6", "PlayStation 4", "", "", "", false], ["Final Fantasy XVI", "PlayStation 5", "", "", "", false], ["Gran Turismo 7", "PlayStation 5", "", "", "", false], ["Gran Turismo Sport", "PlayStation 4", "", "", "", false], ["Hello Neighbor", "PlayStation 4", "", "", "", false], ["Jade Empire: Limited Edition", "Xbox (الأصلي)", "", "", "", false], ["Mario Kart World", "Nintendo Switch 2", "", "", "", false], ["Marvel's Spider-Man 2", "PlayStation 5", "", "", "", false], ["Metal Gear Solid: Master Collection Vol. 1", "Nintendo Switch", "", "", "", false], ["Metal Gear Solid: The Legacy Collection", "PlayStation 3", "Adventure", 2013, "Konami", false], ["Metroid Prime 4: Beyond", "Nintendo Switch 2", "", "", "", false], ["Metroid Prime Remastered", "Nintendo Switch", "", "", "", true], ["Minecraft Legends", "PlayStation 5", "", "", "", false], ["Paper Mario: The Thousand-Year Door", "Nintendo Switch", "RPG", 2004, "Intelligent Systems", false], ["Prince of Persia: The Lost Crown", "Nintendo Switch", "", "", "", false], ["Prince of Persia: The Sands of Time", "Xbox (الأصلي)", "Action", 2003, "Ubisoft", false], ["Psi-Ops: The Mindgate Conspiracy", "Xbox (الأصلي)", "FPS", 2004, "Midway", false], ["Red Dead Redemption", "PlayStation 4", "Action", 2010, "Rockstar San Diego", false], ["SoulCalibur II", "Xbox (الأصلي)", "Fighting", 2003, "Namco", false], ["Tom Clancy's Splinter Cell", "Xbox (الأصلي)", "Action", 2002, "Ubisoft Montreal", false], ["Star Wars: Republic Commando", "Xbox (الأصلي)", "FPS", 2005, "LucasArts", false], ["Super Mario 3D World + Bowser's Fury", "Nintendo Switch", "", "", "", false], ["Super Mario Bros. Wonder", "Nintendo Switch", "", "", "", false], ["The Elder Scrolls IV: Oblivion", "Xbox 360", "RPG", 2006, "Bethesda Game Studios", false], ["The Legend of Zelda: Echoes of Wisdom", "Nintendo Switch", "", "", "", false], ["The Legend of Zelda: Skyward Sword HD", "Nintendo Switch", "", "", "", true], ["The LEGO Movie Videogame", "PlayStation 4", "Action", 2014, "TT Games", false], ["Tom Clancy's Splinter Cell: Chaos Theory", "Xbox (الأصلي)", "Action", 2005, "Ubisoft Montreal", false], ["Tom Clancy's Splinter Cell: Double Agent", "Xbox (الأصلي)", "Action", 2006, "Ubisoft Shanghai", false], ["Tom Clancy's Splinter Cell: Pandora Tomorrow", "Xbox (الأصلي)", "Action", 2004, "Ubisoft Shanghai", false], ["WWE 2K22", "PlayStation 5", "", "", "", false], ["Watch Dogs: Legion", "PlayStation 4", "", "", "", false], ["Watch Dogs: Legion", "PlayStation 5", "", "", "", false], ["Xenoblade Chronicles X: Definitive Edition", "Nintendo Switch", "", "", "", false]];
 const makeId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const GENRES = ["Action", "Action-Adventure", "Action RPG", "Adventure", "Arcade", "Battle Royale", "Beat 'em up", "Card Game", "Fighting", "FPS", "Hack and Slash", "Horror", "Survival Horror", "JRPG", "RPG", "Tactical RPG", "MMORPG", "Metroidvania", "Souls-like", "Open World", "Party", "Platformer", "Point & Click", "Puzzle", "Racing", "Kart Racing", "Rhythm/Music", "Roguelike", "Sandbox", "Shooter", "TPS", "Simulation", "Sports", "Stealth", "Strategy", "RTS", "Turn-Based Strategy", "Survival", "Tower Defense", "Visual Novel", "Other"];
 /* ترحيل التصنيفات القديمة (العربية) إلى الإنجليزية — يعمل تلقائياً عند التحميل والاستيراد */
@@ -414,36 +456,9 @@ const fmtHMS = ms => {
   const p = n => String(n).padStart(2, "0");
   return p(h) + ":" + p(m) + ":" + p(x);
 };
-const NINTENDO_LIB = [["Octopath Traveler", "Nintendo Switch"], ["NBA 2K19", "Nintendo Switch"], ["Crash Bandicoot N. Sane Trilogy", "Nintendo Switch"], ["Arcade Archives VS. Super Mario Bros.", "Nintendo Switch"], ["Cuphead", "Nintendo Switch"], ["Super Mario Party", "Nintendo Switch"], ["ACA NEOGEO Baseball Stars 2", "Nintendo Switch"], ["Super Mario Maker 2", "Nintendo Switch"], ["Mario + Rabbids Kingdom Battle", "Nintendo Switch"], ["Valkyria Chronicles", "Nintendo Switch"], ["Super Smash Bros. Ultimate", "Nintendo Switch"], ["Star Wars Jedi Knight II: Jedi Outcast", "Nintendo Switch"], ["Dragon Quest XI S: Echoes of an Elusive Age - Definitive Edition", "Nintendo Switch"], ["Final Fantasy VII", "Nintendo Switch"], ["Xenoblade Chronicles 2", "Nintendo Switch"], ["Ni no Kuni: Wrath of the White Witch", "Nintendo Switch"], ["Diablo III: Eternal Collection", "Nintendo Switch"], ["Diablo II: Resurrected", "Nintendo Switch"], ["BioShock Infinite: The Complete Edition", "Nintendo Switch"], ["Animal Crossing: New Horizons", "Nintendo Switch"], ["The Legend of Zelda: Tears of the Kingdom", "Nintendo Switch"], ["Dragon Quest III HD-2D Remake", "Nintendo Switch"], ["Final Fantasy", "Nintendo Switch"], ["Final Fantasy II", "Nintendo Switch"], ["Final Fantasy III", "Nintendo Switch"], ["Final Fantasy IV", "Nintendo Switch"], ["Final Fantasy V", "Nintendo Switch"], ["Final Fantasy VI", "Nintendo Switch"], ["Sid Meier's Civilization VII", "Nintendo Switch 2"], ["No Man's Sky", "Nintendo Switch 2"]];
-function buildSeed() {
-  return SEED.map((g, i) => ({
-    id: "seed_" + i,
-    name: g[0],
-    platform: g[1],
-    hardware: "original",
-    status: "library",
-    type: "disc",
-    source: "",
-    nso: false,
-    nsoSystem: "",
-    genre: g[2] || "",
-    year: g[3] || "",
-    developer: g[4] || "",
-    remaster: g[5] || false,
-    rating: 0,
-    hours: 0,
-    dateAdded: "2024-01-01",
-    dateCompleted: "",
-    notes: "",
-    hasCover: false
-  }));
-}
-
 /* ============================================================
-   كتالوج Nintendo Switch Online — الألعاب الكلاسيكية المقدّمة عبر الخدمة
-   (NES / SNES / N64 / Game Boy / GBA / Sega Genesis ضمن باقة Expansion Pack)
-   كل لعبة تُضاف من هنا تُسجَّل تلقائيًا بمنصة Nintendo Switch مع وسم NSO
-   وتوضيح النظام الأصلي الذي صدرت عليه اللعبة.
+   وسم Nintendo Switch Online — لتعليم لعبة يدويًا كمُلعوبة عبر الخدمة
+   وتوضيح النظام الأصلي الذي صدرت عليه.
    ============================================================ */
 const NSO_SYSTEMS = {
   nes: {
@@ -476,7 +491,6 @@ const NSO_SYSTEMS = {
   }
 };
 const NSO_PLATFORM = { nes: "NES", snes: "SNES", n64: "Nintendo 64", gb: "Game Boy / Color", gba: "Game Boy Advance", genesis: "Sega Genesis", gamecube: "Nintendo GameCube" };
-const NSO_CATALOG = [["Super Mario Bros.", "nes", "Platformer", 1985, "Nintendo"], ["Super Mario Bros. 3", "nes", "Platformer", 1988, "Nintendo"], ["The Legend of Zelda", "nes", "Action", 1986, "Nintendo"], ["Zelda II: The Adventure of Link", "nes", "Action", 1987, "Nintendo"], ["Metroid", "nes", "Platformer", 1986, "Nintendo"], ["Kirby's Adventure", "nes", "Platformer", 1993, "HAL Laboratory"], ["Donkey Kong Country", "snes", "Platformer", 1994, "Rare"], ["Donkey Kong Country 2: Diddy's Kong Quest", "snes", "Platformer", 1995, "Rare"], ["Super Mario World", "snes", "Platformer", 1990, "Nintendo"], ["Super Mario Kart", "snes", "Racing", 1992, "Nintendo"], ["Super Metroid", "snes", "Platformer", 1994, "Nintendo"], ["The Legend of Zelda: A Link to the Past", "snes", "Action", 1991, "Nintendo"], ["Star Fox", "snes", "Action", 1993, "Nintendo"], ["F-Zero", "snes", "Racing", 1990, "Nintendo"], ["Kirby Super Star", "snes", "Platformer", 1996, "HAL Laboratory"], ["Super Mario RPG: Legend of the Seven Stars", "snes", "RPG", 1996, "Square"], ["Earthbound", "snes", "RPG", 1994, "Ape Inc."], ["Street Fighter II Turbo", "snes", "Fighting", 1993, "Capcom"], ["Mega Man X", "snes", "Platformer", 1993, "Capcom"], ["Super Punch-Out!!", "snes", "Fighting", 1994, "Nintendo"], ["Super Mario 64", "n64", "Platformer", 1996, "Nintendo"], ["The Legend of Zelda: Ocarina of Time", "n64", "Action", 1998, "Nintendo"], ["The Legend of Zelda: Majora's Mask", "n64", "Action", 2000, "Nintendo"], ["Mario Kart 64", "n64", "Racing", 1996, "Nintendo"], ["GoldenEye 007", "n64", "Shooter", 1997, "Rare"], ["Star Fox 64", "n64", "Action", 1997, "Nintendo"], ["F-Zero X", "n64", "Racing", 1998, "Nintendo"], ["Kirby 64: The Crystal Shards", "n64", "Platformer", 2000, "HAL Laboratory"], ["Mario Party", "n64", "Action", 1998, "Hudson Soft"], ["Mario Party 2", "n64", "Action", 1999, "Hudson Soft"], ["Mario Party 3", "n64", "Action", 2000, "Hudson Soft"], ["Banjo-Kazooie", "n64", "Platformer", 1998, "Rare"], ["Yoshi's Story", "n64", "Platformer", 1997, "Nintendo"], ["Paper Mario", "n64", "RPG", 2000, "Intelligent Systems"], ["Pokémon Snap", "n64", "Adventure", 1999, "HAL Laboratory"], ["Sin and Punishment", "n64", "Shooter", 2000, "Treasure"], ["1080° Snowboarding", "n64", "Racing", 1998, "Nintendo"], ["Pokémon Red", "gb", "RPG", 1996, "Game Freak"], ["Pokémon Blue", "gb", "RPG", 1996, "Game Freak"], ["Pokémon Gold", "gb", "RPG", 1999, "Game Freak"], ["Pokémon Silver", "gb", "RPG", 1999, "Game Freak"], ["Super Mario Land 2: 6 Golden Coins", "gb", "Platformer", 1992, "Nintendo"], ["The Legend of Zelda: Link's Awakening", "gb", "Action", 1993, "Nintendo"], ["Kirby's Dream Land", "gb", "Platformer", 1992, "HAL Laboratory"], ["Metroid II: Return of Samus", "gb", "Platformer", 1991, "Nintendo"], ["Wario Land: Super Mario Land 3", "gb", "Platformer", 1994, "Nintendo"], ["Mario Kart: Super Circuit", "gba", "Racing", 2001, "Intelligent Systems"], ["The Legend of Zelda: The Minish Cap", "gba", "Action", 2004, "Capcom"], ["Metroid Fusion", "gba", "Platformer", 2002, "Nintendo"], ["Metroid: Zero Mission", "gba", "Platformer", 2004, "Nintendo"], ["WarioWare, Inc.: Mega Microgame$!", "gba", "Action", 2003, "Nintendo"], ["Kirby & The Amazing Mirror", "gba", "Platformer", 2004, "HAL Laboratory"], ["Fire Emblem", "gba", "RPG", 2003, "Intelligent Systems"], ["Advance Wars", "gba", "RPG", 2001, "Intelligent Systems"], ["Sonic the Hedgehog", "genesis", "Platformer", 1991, "Sega"], ["Sonic the Hedgehog 2", "genesis", "Platformer", 1992, "Sega"], ["Sonic the Hedgehog 3", "genesis", "Platformer", 1994, "Sega"], ["Streets of Rage 2", "genesis", "Action", 1992, "Sega"], ["Golden Axe", "genesis", "Action", 1989, "Sega"], ["Gunstar Heroes", "genesis", "Shooter", 1993, "Treasure"], ["Castlevania: Bloodlines", "genesis", "Platformer", 1994, "Konami"], ["Phantasy Star IV", "genesis", "RPG", 1993, "Sega"], ["Donkey Kong", "nes", "Platformer", 1981, "Nintendo"], ["Donkey Kong Jr.", "nes", "Platformer", 1982, "Nintendo"], ["Mario Bros.", "nes", "Action", 1983, "Nintendo"], ["Excitebike", "nes", "Racing", 1984, "Nintendo"], ["Ice Climber", "nes", "Platformer", 1985, "Nintendo"], ["Balloon Fight", "nes", "Action", 1985, "Nintendo"], ["Kid Icarus", "nes", "Platformer", 1986, "Nintendo"], ["Punch-Out!! Featuring Mr. Dream", "nes", "Fighting", 1987, "Nintendo"], ["Castlevania", "nes", "Platformer", 1986, "Konami"], ["Castlevania II: Simon's Quest", "nes", "Platformer", 1988, "Konami"], ["Castlevania III: Dracula's Curse", "nes", "Platformer", 1989, "Konami"], ["Mega Man", "nes", "Platformer", 1987, "Capcom"], ["Mega Man 2", "nes", "Platformer", 1988, "Capcom"], ["Mega Man 3", "nes", "Platformer", 1990, "Capcom"], ["Double Dragon", "nes", "Action", 1988, "Technos Japan"], ["Double Dragon II: The Revenge", "nes", "Action", 1990, "Technos Japan"], ["River City Ransom", "nes", "Action", 1989, "Technos Japan"], ["Ninja Gaiden", "nes", "Action", 1989, "Tecmo"], ["Final Fantasy", "nes", "RPG", 1990, "Square"], ["Dr. Mario", "nes", "Action", 1990, "Nintendo"], ["Tetris", "nes", "Action", 1989, "Nintendo"], ["Star Soldier", "nes", "Shooter", 1986, "Hudson Soft"], ["Gradius", "nes", "Shooter", 1986, "Konami"], ["TwinBee", "nes", "Shooter", 1986, "Konami"], ["Adventures of Lolo", "nes", "Action", 1989, "HAL Laboratory"], ["StarTropics", "nes", "Adventure", 1990, "Nintendo"], ["Donkey Kong Country 3: Dixie Kong's Double Trouble!", "snes", "Platformer", 1996, "Rare"], ["Yoshi's Island", "snes", "Platformer", 1995, "Nintendo"], ["Kirby's Dream Course", "snes", "Action", 1995, "HAL Laboratory"], ["Pilotwings", "snes", "Action", 1991, "Nintendo"], ["Final Fantasy VI", "snes", "RPG", 1994, "Square"], ["Secret of Mana", "snes", "RPG", 1993, "Square"], ["Breath of Fire", "snes", "RPG", 1994, "Capcom"], ["Demon's Crest", "snes", "Platformer", 1994, "Capcom"], ["Mega Man X2", "snes", "Platformer", 1994, "Capcom"], ["Mega Man X3", "snes", "Platformer", 1995, "Capcom"], ["Contra III: The Alien Wars", "snes", "Shooter", 1992, "Konami"], ["Super Castlevania IV", "snes", "Platformer", 1991, "Konami"], ["Super Ghouls'n Ghosts", "snes", "Platformer", 1991, "Capcom"], ["Pop'n TwinBee", "snes", "Shooter", 1993, "Konami"], ["Super Mario All-Stars", "snes", "Platformer", 1993, "Nintendo"], ["ActRaiser", "snes", "Action", 1990, "Quintet"], ["Harvest Moon", "snes", "RPG", 1996, "Pack-In-Video"], ["Tetris Attack", "snes", "Action", 1996, "Intelligent Systems"], ["Super Smash Bros.", "n64", "Fighting", 1999, "HAL Laboratory"], ["Diddy Kong Racing", "n64", "Racing", 1997, "Rare"], ["Wave Race 64", "n64", "Racing", 1996, "Nintendo"], ["Pilotwings 64", "n64", "Action", 1996, "Nintendo"], ["Mario Golf", "n64", "Sports", 1999, "Camelot Software Planning"], ["Mario Tennis", "n64", "Sports", 2000, "Camelot Software Planning"], ["Pokémon Stadium", "n64", "Action", 1999, "HAL Laboratory"], ["Pokémon Stadium 2", "n64", "Action", 2000, "HAL Laboratory"], ["Killer Instinct Gold", "n64", "Fighting", 1996, "Rare"], ["Cruis'n USA", "n64", "Racing", 1996, "Williams"], ["Dr. Mario 64", "n64", "Action", 2001, "Nintendo"], ["Mischief Makers", "n64", "Platformer", 1997, "Treasure"], ["Snowboard Kids", "n64", "Racing", 1998, "Racdym"], ["Ogre Battle 64: Person of Lordly Caliber", "n64", "RPG", 2000, "Quest"], ["Custom Robo", "n64", "Action", 1999, "Noise"], ["F-Zero GX", "gamecube", "Racing", 2003, "Amusement Vision"], ["The Legend of Zelda: The Wind Waker", "gamecube", "Action", 2002, "Nintendo"], ["SoulCalibur II", "gamecube", "Fighting", 2003, "Namco"], ["Chibi-Robo!", "gamecube", "Action", 2005, "Skip Ltd."], ["Pikmin 2", "gamecube", "Action", 2004, "Nintendo"], ["Battalion Wars", "gamecube", "Action", 2005, "Kuju Entertainment"], ["Fire Emblem: Path of Radiance", "gamecube", "RPG", 2005, "Intelligent Systems"], ["Doshin the Giant", "gamecube", "Action", 1999, "Nintendo"], ["Tetris", "gb", "Action", 1989, "Nintendo"], ["Donkey Kong", "gb", "Platformer", 1994, "Nintendo"], ["Super Mario Land", "gb", "Platformer", 1989, "Nintendo"], ["Kirby's Pinball Land", "gb", "Action", 1993, "HAL Laboratory"], ["Super Mario Advance", "gba", "Platformer", 2001, "Nintendo"], ["Super Mario Advance 4: Super Mario Bros. 3", "gba", "Platformer", 2003, "Nintendo"], ["Super Mario World: Super Mario Advance 2", "gba", "Platformer", 2001, "Nintendo"], ["Yoshi's Island: Super Mario Advance 3", "gba", "Platformer", 2002, "Nintendo"], ["F-Zero: Maximum Velocity", "gba", "Racing", 2001, "Nintendo"], ["Golden Sun", "gba", "RPG", 2001, "Camelot Software Planning"], ["Golden Sun: The Lost Age", "gba", "RPG", 2003, "Camelot Software Planning"], ["Pokémon Mystery Dungeon: Red Rescue Team", "gba", "RPG", 2005, "Chunsoft"], ["Mario & Luigi: Superstar Saga", "gba", "RPG", 2003, "AlphaDream"], ["Mega Man Zero", "gba", "Platformer", 2002, "Inti Creates"], ["Astro Boy: Omega Factor", "gba", "Action", 2003, "Treasure"], ["Streets of Rage", "genesis", "Action", 1991, "Sega"], ["Streets of Rage 3", "genesis", "Action", 1994, "Sega"], ["Shinobi III: Return of the Ninja Master", "genesis", "Platformer", 1993, "Sega"], ["Comix Zone", "genesis", "Action", 1995, "Sega"], ["ToeJam & Earl", "genesis", "Action", 1991, "Johnson Voorsanger Productions"], ["ToeJam & Earl in Panic on Funkotron", "genesis", "Platformer", 1993, "Johnson Voorsanger Productions"], ["Alex Kidd in the Enchanted Castle", "genesis", "Platformer", 1989, "Sega"], ["Ristar", "genesis", "Platformer", 1995, "Sega"], ["Vectorman", "genesis", "Platformer", 1995, "BlueSky Software"], ["Dynamite Headdy", "genesis", "Platformer", 1994, "Treasure"], ["Shining Force", "genesis", "RPG", 1992, "Sega"], ["Shining Force II", "genesis", "RPG", 1993, "Sega"], ["Ecco the Dolphin", "genesis", "Adventure", 1992, "Novotrade"], ["Altered Beast", "genesis", "Action", 1988, "Sega"]];
 
 
 /* ============================================================
@@ -522,6 +536,14 @@ const TRACKS = [{
   start: 1,
   blurb: "ألعاب أنهيتها",
   metric: g => g.filter(x => x.status === "completed").length
+}, {
+  id: "crt",
+  icon: "📺",
+  title: "عاشق الكلاسيكية",
+  unit: "لعبة",
+  start: 1,
+  blurb: "لعبتها على CRT",
+  metric: g => g.filter(x => x.displayType === "crt").length
 }, {
   id: "hours",
   icon: "⏱️",
@@ -696,6 +718,41 @@ const BADGES = [{
   hidden: true,
   check: g => g.some(x => (x.playthroughs || []).some(p => p.date && x.dateAdded && String(p.date).slice(0, 10) === String(x.dateAdded).slice(0, 10)))
 }, {
+  id: "crt_finisher",
+  icon: "📻",
+  title: "سيد الكاثود",
+  desc: "ختمت لعبة على شاشة CRT",
+  hidden: true,
+  check: g => g.some(x => x.displayType === "crt" && runsCountOf(x) > 0)
+}, {
+  id: "console_hacker",
+  icon: "🏴‍☠️",
+  title: "مخترق الكونسول",
+  desc: "لعبت لعبة عبر محاكي كونسول",
+  hidden: true,
+  check: g => g.some(x => x.hardware === "emulator" && x.emuDevice === "console")
+}, {
+  id: "cloud_surfer",
+  icon: "☁️",
+  title: "مُحلق في السحاب",
+  desc: "لعبت عبر خدمة اشتراك",
+  hidden: true,
+  check: g => g.some(x => x.type === "subscription")
+}, {
+  id: "sd_hoarder",
+  icon: "💾",
+  title: "جامع الملفات",
+  desc: "مكتبة 5 ألعاب محملة",
+  hidden: true,
+  check: g => g.filter(x => x.type === "downloaded").length >= 5
+}, {
+  id: "physical_collector",
+  icon: "💿",
+  title: "مقتني التحف",
+  desc: "تمتلك 10 نسخ ملموسة",
+  hidden: true,
+  check: g => g.filter(x => x.type === "physical").length >= 10
+}, {
   id: "triweek",
   icon: "🌪️",
   title: "إعصار التختيم",
@@ -756,7 +813,7 @@ const BADGES = [{
   icon: "💿",
   title: "هجين",
   desc: "تملك ديسك ورقمي معًا",
-  check: g => g.some(x => x.type === "disc") && g.some(x => x.type === "digital")
+  check: g => g.some(x => x.type === "physical") && g.some(x => x.type === "digital")
 }, {
   id: "eras",
   icon: "🧭",
@@ -883,7 +940,7 @@ const BADGES = [{
   icon: "📀",
   title: "جامع الأقراص",
   desc: "20 لعبة على قرص",
-  check: g => g.filter(x => x.type === "disc").length >= 20
+  check: g => g.filter(x => x.type === "physical").length >= 20
 }, {
   id: "digital20",
   icon: "⬇️",
@@ -1119,7 +1176,7 @@ function baseXp(games) {
   for (const g of games) {
     // نقاط وجود اللعبة حسب النوع: محاكي/NSO = 1، رقمية = 5، ديسك = 10
     // غلاف المجموعة منتَج لا لعبة → لا نقاط اقتناء له (ألعابه الداخلية تُحتسب)
-    if (!isShell(g)) xp += g.nso ? 1 : (g.type === "disc" ? 10 : 5);
+    if (!isShell(g)) xp += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
     xp += XP_PER_HOUR * Math.max(0, realPlayHours(g)); // نقاط ساعات اللعب الحقيقية
     const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
     runs.forEach((r, i) => {
@@ -1606,7 +1663,6 @@ const KEY_UNLOCKED = "gamelib:unlocked";
 const KEY_INTERNAL_BACKUP = "gamelib:internalbackup";
 const KEY_IMGVER = "gamelib:imgver";
 const IMG_VER = 2;
-const KEY_NSO_CUSTOM = "gamelib:nso_custom";
 const KEY_RAWG = "gamelib:rawgkey";
 const KEY_TIMER = "gamelib:timer";
 const KEY_NSOSUB = "gamelib:nsosub";
@@ -1752,11 +1808,21 @@ function Stars({
     }
   }, "★")));
 }
+const EMU_DEVICES = {
+  pc: { label: "حاسب", icon: "💻" },
+  steamdeck: { label: "Steam Deck", icon: "🎮" },
+  aynthor: { label: "AYN Thor", icon: "📱" },
+  console: { label: "كونسول آخر", icon: "📺" },
+  nso: { label: "Nintendo Switch Online", icon: "🔴" },
+  other: { label: "جهاز آخر", icon: "🧪" }
+};
 function PlatformBadge({
   platform,
-  hardware
+  hardware,
+  emuDevice
 }) {
   const c = colorOf(platform);
+  const emu = hardware === "emulator" ? (EMU_DEVICES[emuDevice] || EMU_DEVICES.other) : null;
   return /*#__PURE__*/React.createElement("span", {
     style: {
       display: "inline-flex",
@@ -1771,9 +1837,9 @@ function PlatformBadge({
       border: "1px solid " + c + "55",
       whiteSpace: "nowrap"
     }
-  }, platform, hardware === "emulator" && /*#__PURE__*/React.createElement("span", {
-    title: "محاكي"
-  }, "🧪"));
+  }, platform, emu && /*#__PURE__*/React.createElement("span", {
+    title: "محاكي — " + emu.label
+  }, " " + emu.icon));
 }
 
 /* ===== اللون الحيّ: استخراج لون مهيمن من غلاف اللعبة ===== */
@@ -1842,77 +1908,22 @@ function vtOpen(id, fn) {
 
 /* ══════════════════════════════════════════════════════════
    PWA — تثبيت كتطبيق مستقل + Service Worker + إشعارات خلفية
-   كل شيء مضمّن في الملف (بلا ملفات خارجية) عبر Blob و data-URI
+   manifest.json و sw.js ملفات حقيقية على القرص (لا Blob) حتى تبقى
+   مسجَّلة بثبات بين الجلسات وتدعم الاستضافة على GitHub Pages.
    ══════════════════════════════════════════════════════════ */
-const APP_ICON = "data:image/svg+xml," + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">' +
-  '<rect width="512" height="512" rx="112" fill="#0b0d17"/>' +
-  '<rect width="512" height="512" rx="112" fill="url(#g)" opacity="0.22"/>' +
-  '<defs><radialGradient id="g" cx="0.5" cy="0.2" r="0.9"><stop offset="0" stop-color="#ffc24b"/><stop offset="1" stop-color="#0b0d17"/></radialGradient></defs>' +
-  '<text x="256" y="330" font-size="240" text-anchor="middle">🕹️</text></svg>');
-
 function registerPWA() {
-  // 1) Manifest عبر data-URI
-  const manifest = {
-    name: "مكتبتي الجيمرية", short_name: "مكتبتي", lang: "ar", dir: "rtl",
-    start_url: ".", scope: ".", display: "standalone",
-    background_color: "#07080e", theme_color: "#0b0d17", orientation: "portrait",
-    icons: [
-      { src: APP_ICON, sizes: "192x192", type: "image/svg+xml", purpose: "any" },
-      { src: APP_ICON, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }
-    ]
-  };
-  try {
-    const blob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
-    let link = document.querySelector('link[rel="manifest"]');
-    if (!link) { link = document.createElement("link"); link.rel = "manifest"; document.head.appendChild(link); }
-    link.href = URL.createObjectURL(blob);
-    // أيقونة apple-touch
-    let al = document.createElement("link"); al.rel = "apple-touch-icon"; al.href = APP_ICON; document.head.appendChild(al);
-    let am = document.createElement("meta"); am.name = "apple-mobile-web-app-capable"; am.content = "yes"; document.head.appendChild(am);
-    let at = document.createElement("meta"); at.name = "apple-mobile-web-app-status-bar-style"; at.content = "black-translucent"; document.head.appendChild(at);
-  } catch (e) {}
-
-  // 2) Service Worker عبر Blob — يدير تنبيه الخلفية للعدّاد المنسي
+  // رابط الـmanifest موجود في <head> أصلًا (manifest.json) — لا حاجة لحقنه هنا.
   if ("serviceWorker" in navigator) {
-    const swCode = `
-      const NAG = 'gamelib-timer-nag';
-      // نستقبل حالة العدّاد من الصفحة ونجدول تنبيهات كل ساعة عبر setTimeout حيّ ما دام SW نشطًا
-      let timers = [];
-      function clearAll(){ timers.forEach(clearTimeout); timers = []; }
-      self.addEventListener('message', e => {
-        const d = e.data || {};
-        if (d.type === 'timer-start') {
-          clearAll();
-          const started = d.startedAt, acc = d.accMs || 0, name = d.name || 'اللعبة';
-          // جدول تنبيهًا عند كل ساعة قادمة (حتى 12 ساعة احتياطًا)
-          for (let h = Math.floor(acc/3600000)+1; h <= 12; h++) {
-            const fireIn = h*3600000 - acc - (Date.now() - started);
-            if (fireIn <= 0) continue;
-            timers.push(setTimeout(() => {
-              self.registration.showNotification('⏱️ عدّاد اللعب لا يزال شغالًا', {
-                body: name + ' — ' + h + ' ساعة حتى الآن. لا تنسَ إيقافه إذا خلصت!',
-                tag: NAG, renotify: true, requireInteraction: true,
-                icon: '${APP_ICON}', badge: '${APP_ICON}'
-              });
-            }, fireIn));
+    navigator.serviceWorker.register("sw.js").then(reg => {
+      // أفضل جهد: Periodic Background Sync لتطبيق مثبَّت (المتصفح يقرر التوقيت الفعلي)
+      if ("periodicSync" in reg) {
+        navigator.permissions.query({ name: "periodic-background-sync" }).then(status => {
+          if (status.state === "granted") {
+            reg.periodicSync.register("gamelib-nag-check", { minInterval: 5 * 60 * 1000 }).catch(() => {});
           }
-        } else if (d.type === 'timer-stop') { clearAll(); }
-      });
-      self.addEventListener('notificationclick', e => {
-        e.notification.close();
-        e.waitUntil(clients.matchAll({type:'window', includeUncontrolled:true}).then(cs => {
-          for (const c of cs) if ('focus' in c) return c.focus();
-          if (clients.openWindow) return clients.openWindow('.');
-        }));
-      });
-      self.addEventListener('install', () => self.skipWaiting());
-      self.addEventListener('activate', e => e.waitUntil(clients.claim()));
-    `;
-    try {
-      const swUrl = URL.createObjectURL(new Blob([swCode], { type: "text/javascript" }));
-      navigator.serviceWorker.register(swUrl).catch(() => {});
-    } catch (e) {}
+        }).catch(() => {});
+      }
+    }).catch(() => {});
   }
 }
 
@@ -1933,7 +1944,10 @@ const GameCard = React.memo(function GameCard({
   cover,
   onOpen,
   bundleCount,
-  bundleHours
+  bundleHours,
+  selectionMode,
+  selected,
+  onToggleSelect
 }) {
   const st = STATUSES[game.status];
   const c = colorOf(game.platform);
@@ -2003,7 +2017,7 @@ const GameCard = React.memo(function GameCard({
     className: "card-body"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-name"
-  }, game.name), bundleCount > 0 && /*#__PURE__*/React.createElement("div", {
+  }, game.name, game.displayType === "crt" && " 📺"), bundleCount > 0 && /*#__PURE__*/React.createElement("div", {
     className: "card-grp",
     title: "لعبة تحتوي ألعابًا داخلية"
   }, "🗂️ ", bundleCount === 1 ? "تحتوي لعبة داخلية" : bundleCount === 2 ? "تحتوي لعبتين داخليتين" : "تحتوي " + bundleCount + " ألعاب داخلية"), game.group && /*#__PURE__*/React.createElement("div", {
@@ -2015,12 +2029,13 @@ const GameCard = React.memo(function GameCard({
     className: "card-meta"
   }, /*#__PURE__*/React.createElement(PlatformBadge, {
     platform: game.platform,
-    hardware: game.hardware
+    hardware: game.hardware,
+    emuDevice: game.emuDevice
   })), /*#__PURE__*/React.createElement("div", {
     className: "card-foot"
   }, /*#__PURE__*/React.createElement("span", {
     className: "card-type"
-  }, game.type === "disc" ? "💿 ديسك" : "☁️ رقمي"), (() => { const th = bundleCount > 0 && bundleHours != null ? bundleHours : Number(game.hours) || 0; return th > 0 ? /*#__PURE__*/React.createElement("span", null, "⏱ ", fmtHours(th)) : null; })(), Number(game.rating) > 0 && /*#__PURE__*/React.createElement(Stars, {
+  }, game.type === "physical" ? "💿 أصلي" : game.type === "digital" ? "☁️ رقمي" : game.type === "downloaded" ? "💾 محملة" : "🎟️ اشتراك"), (() => { const th = bundleCount > 0 && bundleHours != null ? bundleHours : Number(game.hours) || 0; return th > 0 ? /*#__PURE__*/React.createElement("span", null, "⏱ ", fmtHours(th)) : null; })(), Number(game.rating) > 0 && /*#__PURE__*/React.createElement(Stars, {
     value: Number(game.rating),
     size: 12
   }))));
@@ -2103,8 +2118,9 @@ const blankGame = () => ({
   name: "",
   platform: "Nintendo Switch",
   hardware: "original",
+  arcadeMode: false,
   status: "library",
-  type: "disc",
+  type: "physical",
   source: "",
   nso: false,
   nsoSystem: "",
@@ -2412,14 +2428,20 @@ function GameDetail({
   const today = localDay(new Date());
   const openComplete = () => setComp({
     date: today,
-    hours: ""
+    hours: "",
+    score: ""
   });
   const confirmComplete = async () => {
-    if (!(Number(comp.hours) > 0)) {
+    const pi = selPart;
+    if (pi < 0 && game.arcadeMode) {
+      if (!(Number(comp.score) > 0)) {
+        setMsg("أدخل أعلى نتيجة أولًا قبل الاعتماد");
+        return;
+      }
+    } else if (!(Number(comp.hours) > 0)) {
       setMsg("أدخل عدد ساعات اللعب أولًا قبل الاعتماد");
       return;
     }
-    const pi = selPart;
     const n = await onAddPlaythrough(game.id, comp, pi);
     setComp(null);
     setMsg("");
@@ -2562,7 +2584,7 @@ function GameDetail({
     style: { backgroundImage: "url(" + cover + ")" }
   }), /*#__PURE__*/React.createElement("div", {
     className: "modal-head gd-z"
-  }, /*#__PURE__*/React.createElement("h2", null, game.name),
+  }, /*#__PURE__*/React.createElement("h2", null, game.name, game.displayType === "crt" && " 📺"),
     /*#__PURE__*/React.createElement("div", { className: "head-acts" },
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onEdit, title: "تعديل / حذف" }, "✏️"),
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onClose, title: "إغلاق" }, "✕"))), /*#__PURE__*/React.createElement("div", {
@@ -2726,7 +2748,7 @@ function GameDetail({
     game.year && "📅 " + game.year,
     game.developer && "🛠️ " + game.developer,
     (FAM_ICON[familyOf(game.platform)] || "📦") + " " + game.platform,
-    game.type === "disc" ? "💿 ديسك" : "☁️ رقمي",
+    game.type === "physical" ? "💿 أصلي" : game.type === "digital" ? "☁️ رقمي" : game.type === "downloaded" ? "💾 محملة" : "🎟️ اشتراك",
     game.source && "🏬 " + game.source,
     game.subscription === "gamepass" && "🟢 Game Pass",
     game.subscription === "psplus" && "🔵 PS Plus",
@@ -2932,7 +2954,8 @@ function GameDetail({
     className: "card-meta"
   }, /*#__PURE__*/React.createElement(PlatformBadge, {
     platform: game.platform,
-    hardware: game.hardware
+    hardware: game.hardware,
+    emuDevice: game.emuDevice
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       color: STATUSES[game.status].color,
@@ -2961,15 +2984,24 @@ function GameDetail({
     className: "run-star"
   }, "⭐".repeat(Math.min(p.n, 5))), /*#__PURE__*/React.createElement("span", {
     className: "run-info"
-  }, "التختيمة ", p.n, " • ", p.date, " • ", fmtHours(p.hours), (() => { const rr = rarityOf(game, p.n); return /*#__PURE__*/React.createElement("span", { className: "rar-badge", style: { color: rr.color, borderColor: rr.color + "66" } }, rr.icon, " ", rr.label); })(), (() => { const pc = paceOf(game, p.hours); return pc ? /*#__PURE__*/React.createElement("span", { className: "rar-badge", style: { color: pc.color, borderColor: pc.color + "66" } }, pc.icon, " ", pc.txt) : null; })()), /*#__PURE__*/React.createElement("button", {
+  }, "التختيمة ", p.n, " • ", p.date, " • ", game.arcadeMode ? "🎯 " + Number(p.score || 0).toLocaleString() : fmtHours(p.hours), (() => { const rr = rarityOf(game, p.n); return /*#__PURE__*/React.createElement("span", { className: "rar-badge", style: { color: rr.color, borderColor: rr.color + "66" } }, rr.icon, " ", rr.label); })(), !game.arcadeMode && (() => { const pc = paceOf(game, p.hours); return pc ? /*#__PURE__*/React.createElement("span", { className: "rar-badge", style: { color: pc.color, borderColor: pc.color + "66" } }, pc.icon, " ", pc.txt) : null; })()), /*#__PURE__*/React.createElement("button", {
     className: "run-del",
     onClick: () => onRemovePlaythrough(game.id, i),
     title: "حذف"
   }, "✕"))), comp ? /*#__PURE__*/React.createElement("div", {
     className: "comp-form"
-  }, /*#__PURE__*/React.createElement("p", null, pts.length ? "تختيمة جديدة (رقم " + (pts.length + 1) + "):" : "لاعتماد الإكمال أدخل ساعات اللعب:"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("p", null, pts.length ? "تختيمة جديدة (رقم " + (pts.length + 1) + "):" : (game.arcadeMode ? "لاعتماد الإكمال أدخل أعلى نتيجة:" : "لاعتماد الإكمال أدخل ساعات اللعب:")), /*#__PURE__*/React.createElement("div", {
     className: "comp-row"
-  }, /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", null, "الساعات"), /*#__PURE__*/React.createElement("input", {
+  }, selPart < 0 && game.arcadeMode ? /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", null, "🎯 أعلى نتيجة"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: 0,
+    step: "1",
+    value: comp.score,
+    onChange: e => setComp({
+      ...comp,
+      score: e.target.value
+    })
+  })) : /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", null, "الساعات"), /*#__PURE__*/React.createElement("input", {
     type: "number",
     min: 0,
     step: "0.5",
@@ -3108,61 +3140,8 @@ function GameDetail({
     onClick: onClose
   }, "إغلاق"))))));
 }
-/* ══════════ منتقي كتالوج NSO — يظهر داخل نافذة إضافة/تعديل لعبة فقط ══════════ */
-function NsoPicker({ games, customNSO, onPick, onClose }) {
-  const [sys, setSys] = useState("all");
-  const [q, setQ] = useState("");
-  const inLib = useMemo(() => {
-    const m = new Set();
-    games.forEach(g => { if (g.nso) m.add(String(g.name).trim().toLowerCase()); });
-    return m;
-  }, [games]);
-  const list = useMemo(() => {
-    const built = NSO_CATALOG.map(c => ({ name: c[0], sys: c[1], genre: c[2], year: c[3], dev: c[4] }));
-    const custom = (customNSO || []).map(c => ({ name: c.name, sys: c.sys, genre: c.genre, year: c.year, dev: c.dev, custom: true }));
-    let all = [...built, ...custom];
-    if (sys !== "all") all = all.filter(x => x.sys === sys);
-    const t = q.trim().toLowerCase();
-    if (t) all = all.filter(x => x.name.toLowerCase().includes(t));
-    return all.sort((a, b) => a.name.localeCompare(b.name));
-  }, [customNSO, sys, q]);
-  const counts = useMemo(() => {
-    const c = { all: NSO_CATALOG.length + (customNSO || []).length };
-    NSO_CATALOG.forEach(x => c[x[1]] = (c[x[1]] || 0) + 1);
-    (customNSO || []).forEach(x => c[x.sys] = (c[x.sys] || 0) + 1);
-    return c;
-  }, [customNSO]);
-  return /*#__PURE__*/React.createElement("div", { className: "modal-backdrop np-back", onClick: onClose },
-    /*#__PURE__*/React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
-      /*#__PURE__*/React.createElement("div", { className: "modal-head" },
-        /*#__PURE__*/React.createElement("h2", null, "🔴 كتالوج NSO"),
-        /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onClose }, "✕")),
-      /*#__PURE__*/React.createElement("div", { className: "modal-body np-body" },
-        /*#__PURE__*/React.createElement("input", { className: "search np-q", value: q, placeholder: "🔍 ابحث في " + counts.all + " لعبة…",
-          onChange: e => setQ(e.target.value) }),
-        /*#__PURE__*/React.createElement("div", { className: "np-sys" },
-          [["all", "الكل", "🔴"]].concat(Object.keys(NSO_SYSTEMS).map(k => [k, NSO_SYSTEMS[k].label, NSO_SYSTEMS[k].icon]))
-            .map(([k, l, ic]) => /*#__PURE__*/React.createElement("button", {
-              key: k, className: "ft-chip" + (sys === k ? " on" : ""), onClick: () => setSys(k)
-            }, ic, " ", l, " ", /*#__PURE__*/React.createElement("small", null, counts[k] || 0)))),
-        /*#__PURE__*/React.createElement("div", { className: "np-list" },
-          list.length === 0 ? /*#__PURE__*/React.createElement("div", { className: "runs-empty" }, "لا نتائج") :
-          list.map(x => {
-            const have = inLib.has(x.name.trim().toLowerCase());
-            return /*#__PURE__*/React.createElement("button", {
-              key: x.sys + x.name, className: "np-row" + (have ? " have" : ""),
-              onClick: () => { onPick(x); onClose(); }
-            }, /*#__PURE__*/React.createElement("span", { className: "np-ic" }, NSO_SYSTEMS[x.sys] ? NSO_SYSTEMS[x.sys].icon : "🎮"),
-              /*#__PURE__*/React.createElement("span", { className: "np-i" },
-                /*#__PURE__*/React.createElement("b", null, x.name),
-                /*#__PURE__*/React.createElement("small", null, [NSO_PLATFORM[x.sys] || x.sys, x.year || null, x.genre || null].filter(Boolean).join(" • "))),
-              /*#__PURE__*/React.createElement("span", { className: "np-a" }, have ? "✔︎ عندك" : "＋"));
-          })))));
-}
-
 function GameModal({
   allGames,
-  customNSO,
   initial,
   initialCover,
   onSave,
@@ -3173,12 +3152,7 @@ function GameModal({
   parentOptions
 }) {
   const [g, setG] = useState(initial);
-  const [npOpen, setNpOpen] = useState(false);
   const setPlatform = v => setG(p => sanitizePlatform({ ...p, platform: v }));
-  const pickNso = x => setG(p => ({ ...p, name: x.name, nso: true, nsoSystem: x.sys,
-    platform: NSO_PLATFORM[x.sys] || p.platform, hardware: "original",
-    type: "digital", source: "Nintendo eShop", subscription: "NSO + Expansion Pack",
-    genre: x.genre || p.genre, year: x.year || p.year, developer: x.dev || p.developer }));
   const [grpOpen, setGrpOpen] = useState(false);
   const [cover, setCover] = useState(initialCover || null);
   const [autoState, setAutoState] = useState("idle");
@@ -3189,6 +3163,47 @@ function GameModal({
     [k]: v
   }));
   const isNew = !initial.id;
+  const [wizardStep, setWizardStep] = useState(isNew ? "platform" : "done");
+  const [dbMatched, setDbMatched] = useState(false);
+  const renderPlayback = () => [
+    /*#__PURE__*/React.createElement("div", { className: "seg-label", key: "pl-l" }, "طريقة التشغيل"),
+    /*#__PURE__*/React.createElement("div", { className: "seg", key: "pl-s" },
+      /*#__PURE__*/React.createElement("button", {
+        className: g.hardware === "original" ? "on" : "",
+        onClick: () => set("hardware", "original")
+      }, "🎮 الجهاز الأصلي"),
+      /*#__PURE__*/React.createElement("button", {
+        className: g.hardware === "emulator" ? "on" : "",
+        onClick: () => set("hardware", "emulator")
+      }, "🧪 محاكي")),
+    g.hardware === "original" && isRetroPlatform(g.platform) && /*#__PURE__*/React.createElement(React.Fragment, { key: "disp" },
+      /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "نوع الشاشة"),
+      /*#__PURE__*/React.createElement("div", { className: "seg" },
+        /*#__PURE__*/React.createElement("button", {
+          className: g.displayType === "crt" ? "on" : "",
+          onClick: () => set("displayType", "crt")
+        }, "📺 CRT TV"),
+        /*#__PURE__*/React.createElement("button", {
+          className: g.displayType === "hd" ? "on" : "",
+          onClick: () => set("displayType", "hd")
+        }, "🖥️ HD"))),
+    g.hardware === "emulator" && /*#__PURE__*/React.createElement(React.Fragment, { key: "emu" },
+      /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "جهاز المحاكاة"),
+      /*#__PURE__*/React.createElement("div", {
+        className: "seg", style: { display: "flex", flexWrap: "wrap", gap: "6px" }
+      }, Object.keys(EMU_DEVICES).map(k => /*#__PURE__*/React.createElement("button", {
+        key: k,
+        className: g.emuDevice === k ? "on" : "",
+        onClick: () => set("emuDevice", k)
+      }, EMU_DEVICES[k].icon, " ", EMU_DEVICES[k].label))),
+      g.emuDevice === "other" && /*#__PURE__*/React.createElement("label", {
+        className: "field"
+      }, /*#__PURE__*/React.createElement("span", null, "حدد الجهاز"), /*#__PURE__*/React.createElement("input", {
+        value: g.emuDeviceOther || "",
+        onChange: e => set("emuDeviceOther", e.target.value),
+        placeholder: "مثال: Retroid Pocket"
+      })))
+  ];
   const pickImage = async e => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -3247,6 +3262,95 @@ function GameModal({
     for (const p of PLATFORMS) (out[p.f] = out[p.f] || []).push(p);
     return out;
   }, []);
+  const finishWizard = () => {
+    setWizardStep("done");
+    autoFill();
+  };
+  const playbackReady = g.hardware === "emulator" ? !!g.emuDevice && (g.emuDevice !== "other" || (g.emuDeviceOther || "").trim())
+    : (isRetroPlatform(g.platform) ? !!g.displayType : true);
+  if (isNew && wizardStep !== "done") {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "modal-backdrop",
+      onClick: onClose
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "modal",
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "modal-head"
+    }, /*#__PURE__*/React.createElement("h2", null, "إضافة لعبة"), /*#__PURE__*/React.createElement("button", {
+      className: "icon-btn",
+      onClick: onClose
+    }, "✕")), /*#__PURE__*/React.createElement("div", {
+      className: "modal-body"
+    },
+      wizardStep === "platform" && /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("div", { className: "form-sec" }, "١. اختر الجهاز"),
+        Object.keys(grouped).map(f => /*#__PURE__*/React.createElement("div", { key: f, style: { marginBottom: 10 } },
+          /*#__PURE__*/React.createElement("div", { className: "seg-label" }, FAMILIES[f].label),
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
+            grouped[f].map(p => /*#__PURE__*/React.createElement("button", {
+              key: p.v,
+              className: "btn ghost",
+              onClick: () => { setPlatform(p.v); setWizardStep("name"); }
+            }, p.v))))),
+        /*#__PURE__*/React.createElement("button", {
+          className: "btn ghost",
+          style: { marginTop: 6 },
+          onClick: () => setWizardStep("done")
+        }, "تخطّي المعالج وأدخل كل شيء يدويًا")),
+      wizardStep === "name" && /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("div", { className: "form-sec" }, "٢. اسم اللعبة على ", g.platform),
+        /*#__PURE__*/React.createElement("button", {
+          className: "btn ghost", style: { marginBottom: 8 },
+          onClick: () => setWizardStep("platform")
+        }, "‹ رجوع لاختيار الجهاز"),
+        /*#__PURE__*/React.createElement("input", {
+          className: "search np-q",
+          value: g.name,
+          autoFocus: true,
+          onChange: e => { set("name", e.target.value); setDbMatched(false); },
+          placeholder: "اكتب اسم اللعبة… مثال: resi"
+        }),
+        (() => {
+          const q = g.name.trim();
+          if (q.length < 2) return null;
+          const results = searchLocalGames(g.platform, q, 20);
+          if (!results.length) return /*#__PURE__*/React.createElement("div", { className: "runs-empty", style: { marginTop: 10 } }, "لا نتائج محلية لهذا الجهاز — تقدر تكمل بالاسم اللي كتبته");
+          return /*#__PURE__*/React.createElement("div", { className: "np-list", style: { marginTop: 10 } },
+            results.map((r, i) => /*#__PURE__*/React.createElement("button", {
+              key: r[0] + i,
+              className: "np-row",
+              onClick: () => {
+                setG(p => ({ ...p, name: r[0], year: r[2] || p.year, genre: r[3] || p.genre, developer: r[4] || p.developer }));
+                setDbMatched(true);
+                setWizardStep("playmethod");
+              }
+            }, /*#__PURE__*/React.createElement("span", { className: "np-ic" }, "🎮"),
+              /*#__PURE__*/React.createElement("span", { className: "np-i" },
+                /*#__PURE__*/React.createElement("b", null, r[0]),
+                /*#__PURE__*/React.createElement("small", null, [r[2] || null, r[3] || null, r[4] || null].filter(Boolean).join(" • "))),
+              /*#__PURE__*/React.createElement("span", { className: "np-a" }, "＋"))));
+        })(),
+        /*#__PURE__*/React.createElement("button", {
+          className: "btn primary",
+          style: { marginTop: 10, width: "100%" },
+          disabled: !g.name.trim(),
+          onClick: () => { setWizardStep("playmethod"); }
+        }, "متابعة بهذا الاسم ›")),
+      wizardStep === "playmethod" && /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("div", { className: "form-sec" }, "٣. طريقة التشغيل"),
+        /*#__PURE__*/React.createElement("button", {
+          className: "btn ghost", style: { marginBottom: 8 },
+          onClick: () => setWizardStep("name")
+        }, "‹ رجوع للاسم"),
+        renderPlayback(),
+        /*#__PURE__*/React.createElement("button", {
+          className: "btn primary",
+          style: { marginTop: 10, width: "100%" },
+          disabled: !playbackReady,
+          onClick: finishWizard
+        }, "متابعة — جلب الغلاف والبيانات ›")))));
+  }
   return /*#__PURE__*/React.createElement("div", {
     className: "modal-backdrop",
     onClick: onClose
@@ -3307,13 +3411,6 @@ function GameModal({
   }), /*#__PURE__*/React.createElement("span", null, "📦 هذه ", /*#__PURE__*/React.createElement("b", null, "مجموعة (كوليكشن)"), " — منتَج يحوي ألعاباً، وليست لعبة بذاتها",
     /*#__PURE__*/React.createElement("small", null, "لن تُعدّ ضمن ألعابك ولا تمنح نقاط اقتناء — ألعابها الداخلية هي التي تُحتسب"))),
   /*#__PURE__*/React.createElement("button", {
-    className: "btn ghost np-btn",
-    onClick: () => setNpOpen(true)
-  }, "🔴 اختر من كتالوج Nintendo Switch Online"),
-  npOpen && /*#__PURE__*/React.createElement(NsoPicker, {
-    games: allGames || [], customNSO: customNSO,
-    onPick: pickNso, onClose: () => setNpOpen(false)
-  }), /*#__PURE__*/React.createElement("button", {
     className: "btn auto",
     onClick: autoFill,
     disabled: autoState === "loading"
@@ -3330,19 +3427,10 @@ function GameModal({
   }, grouped[f].map(p => /*#__PURE__*/React.createElement("option", {
     key: p.v,
     value: p.v
-  }, p.v)))))), /*#__PURE__*/React.createElement("div", {
+  }, p.v)))))), renderPlayback(),
+  /*#__PURE__*/React.createElement("div", {
     className: "seg-label"
-  }, "طريقة التشغيل"), /*#__PURE__*/React.createElement("div", {
-    className: "seg"
-  }, /*#__PURE__*/React.createElement("button", {
-    className: g.hardware === "original" ? "on" : "",
-    onClick: () => set("hardware", "original")
-  }, "🎮 الجهاز الأصلي"), /*#__PURE__*/React.createElement("button", {
-    className: g.hardware === "emulator" ? "on" : "",
-    onClick: () => set("hardware", "emulator")
-  }, "🧪 محاكي")), /*#__PURE__*/React.createElement("div", {
-    className: "seg-label"
-  }, "الحالة"), /*#__PURE__*/React.createElement("div", {
+  }, "الحالة"),/*#__PURE__*/React.createElement("div", {
     className: "status-grid"
   }, STATUS_ORDER.map(k => /*#__PURE__*/React.createElement("button", {
     key: k,
@@ -3355,15 +3443,22 @@ function GameModal({
     onClick: () => set("status", k)
   }, STATUSES[k].icon, " ", STATUSES[k].label))), /*#__PURE__*/React.createElement("div", {
     className: "seg-label"
-  }, "النوع"), /*#__PURE__*/React.createElement("div", {
-    className: "seg"
+  }, "النوع و الملكية"), /*#__PURE__*/React.createElement("div", {
+    className: "seg",
+    style: { display: "flex", flexWrap: "wrap", gap: "6px" }
   }, /*#__PURE__*/React.createElement("button", {
-    className: g.type === "disc" ? "on" : "",
-    onClick: () => set("type", "disc")
-  }, "💿 ديسك"), /*#__PURE__*/React.createElement("button", {
+    className: g.type === "physical" ? "on" : "",
+    onClick: () => set("type", "physical")
+  }, "💿 ملموس أصلي"), /*#__PURE__*/React.createElement("button", {
     className: g.type === "digital" ? "on" : "",
     onClick: () => set("type", "digital")
-  }, "☁️ رقمي")), g.type === "digital" && /*#__PURE__*/React.createElement("label", {
+  }, "☁️ رقمي مملوك"), /*#__PURE__*/React.createElement("button", {
+    className: g.type === "downloaded" ? "on" : "",
+    onClick: () => set("type", "downloaded")
+  }, "💾 محملة (SD/HDD)"), /*#__PURE__*/React.createElement("button", {
+    className: g.type === "subscription" ? "on" : "",
+    onClick: () => set("type", "subscription")
+  }, "🎟️ خدمة اشتراك")), (g.type === "digital" || g.type === "subscription") && /*#__PURE__*/React.createElement("label", {
     className: "field"
   }, /*#__PURE__*/React.createElement("span", null, "المتجر الرقمي"), /*#__PURE__*/React.createElement("select", {
     value: g.source,
@@ -3378,7 +3473,7 @@ function GameModal({
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: g.nso,
-    onChange: e => set("nso", e.target.checked)
+    onChange: e => { const v = e.target.checked; setG(p => ({ ...p, nso: v, ...(v ? { hardware: "emulator", emuDevice: "nso" } : {}) })); }
   }), /*#__PURE__*/React.createElement("span", null, "لعبتها عبر ", /*#__PURE__*/React.createElement("b", null, "Nintendo Switch Online + Expansion Pack"), " 🔴")), g.nso && /*#__PURE__*/React.createElement("label", {
     className: "field"
   }, /*#__PURE__*/React.createElement("span", null, "النظام الأصلي للعبة (NSO)"), /*#__PURE__*/React.createElement("select", {
@@ -3407,7 +3502,13 @@ function GameModal({
     type: "checkbox",
     checked: g.remaster,
     onChange: e => set("remaster", e.target.checked)
-  }), /*#__PURE__*/React.createElement("span", null, "نسخة ريماستر / Remaster")), /*#__PURE__*/React.createElement("div", { className: "form-sec" }, "3️⃣ التفاصيل"), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("span", null, "نسخة ريماستر / Remaster")), /*#__PURE__*/React.createElement("label", {
+    className: "check"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!g.arcadeMode,
+    onChange: e => set("arcadeMode", e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", null, "🕹️ ", /*#__PURE__*/React.createElement("b", null, "أسلوب أركيد"), " — تختيمها بأعلى نتيجة لا بساعات القصة")), /*#__PURE__*/React.createElement("div", { className: "form-sec" }, "3️⃣ التفاصيل"), /*#__PURE__*/React.createElement("div", {
     className: "grid2"
   }, /*#__PURE__*/React.createElement("label", {
     className: "field"
@@ -3463,7 +3564,7 @@ function GameModal({
   }, "— لعبة مستقلة في المكتبة —"), (parentOptions || []).map(o => /*#__PURE__*/React.createElement("option", {
     key: o.id,
     value: o.id
-  }, o.name)))), /*#__PURE__*/React.createElement("div", {
+  }, o.name)))), !g.arcadeMode && /*#__PURE__*/React.createElement("div", {
     className: "grid2"
   }, /*#__PURE__*/React.createElement("label", {
     className: "field"
@@ -3751,7 +3852,6 @@ function GuideModal({ onClose }) {
 
       S("➕ إضافة لعبة وتعديلها", li([
         "زر ＋ العائم في المكتبة يفتح نافذة الإضافة. لتعديل لعبة موجودة: افتحها ثم ✏️ في رأس الصفحة.",
-        "🔴 كتالوج NSO: زر أسفل حقل الاسم يفتح كتالوج Nintendo Switch Online (١٦٠+ لعبة). ابحث أو فلتر بالنظام، ثم اضغط لعبة فتُملأ كل حقولها تلقائياً (الاسم، النظام، النوع، السنة، المطوّر) وتُعلَّم كـNSO. الألعاب التي عندك أصلاً تظهر بعلامة ✔︎.",
         "📖 جلب بيانات اللعبة + الغلاف: يبحث في RAWG وويكيبيديا ويملأ النوع والسنة والمطوّر والوصف والغلاف ووقت التختيم المتوقّع.",
         "الحقول: الاسم • الجهاز • الحالة • النوع (ديسك/رقمية) • المصدر • NSO ونظامه الأصلي • Game Pass • النوع • السنة • المطوّر • ريماستر • المجموعة • وقت التختيم (رئيسي/كامل) • التقييم • الساعات.",
         "🧹 تغيير الجهاز ينظّف الحقول التي لم تعد تنطبق تلقائياً — نقل لعبة من إكسبوكس لسويتش يزيل علامة Game Pass، فلا تبقى شارة شبح."
@@ -3778,7 +3878,7 @@ function GuideModal({ onClose }) {
 
       S("⏱️ العدّاد والجلسات", li([
         "▶️ بدء عدّاد اللعب: يبدأ من صفحة اللعبة أو من البطل. تظهر حبّة عائمة باسم اللعبة والوقت الحيّ في كل الصفحات.",
-        "كل ساعة يظهر بانر «ما زلت تلعب؟» مع اهتزاز — لحمايتك من عدّاد نُسي شغّالاً.",
+        "كل 5 دقائق يظهر بانر «ما زلت تلعب؟» مع اهتزاز وتنبيه نظام — لحمايتك من عدّاد نُسي شغّالاً.",
         "الإيقاف يفتح نافذة تأكيد: هي النقطة الوحيدة التي تُسجَّل فيها الجلسة، ويمكنك تعديل المدّة قبل الحفظ.",
         "➕ جلسة يدوية: لإضافة وقت لعبته بلا عدّاد. تُثبَّت على منتصف نهار ذلك اليوم.",
         "كل الأيام تُحسب بتوقيتك المحلي (آسيا/الرياض) لا بتوقيت UTC — فجلسة الساعة ١١ ليلاً تُنسب لليوم الصحيح."
@@ -3847,7 +3947,7 @@ function GuideModal({ onClose }) {
       ])),
 
       S("🔴 Nintendo Switch Online", li([
-        "لم تعد NSO قسماً منفصلاً — الكتالوج يظهر فقط داخل نافذة إضافة/تعديل لعبة.",
+        "علّمها يدويًا: فعّل خانة «لعبتها عبر Nintendo Switch Online» من نموذج التعديل واختر نظامها الأصلي.",
         "ألعاب NSO عندك تتجمّع خلف بطاقة اشتراك واحدة في المكتبة، تفتحها لترى كل ألعابك عبر الخدمة وساعاتها.",
         "لعبة NSO تساوي 1 XP عند الإضافة (لأنها مستأجرة لا مملوكة)، لكن ساعاتها وتختيماتها تُحتسب كاملةً."
       ])),
@@ -4834,227 +4934,6 @@ function AchievementsView({
   }, n)))));
 }
 
-/* ---------- تبويب Nintendo Switch Online ---------- */
-function NSOView({
-  games,
-  onAdd,
-  onOpen,
-  customNSO,
-  onAddCustom,
-  onRemoveCustom
-}) {
-  const [fSys, setFSys] = useState("all");
-  const [nSort, setNSort] = useState("none");
-  const [busy, setBusy] = useState({}); // name -> 'loading' | 'done' | 'error'
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    sys: "nes",
-    genre: "",
-    year: "",
-    dev: "",
-    svcDate: ""
-  });
-  const inLibrary = useMemo(() => {
-    const m = new Map();
-    for (const g of games) if (g.nso) m.set(g.name.trim().toLowerCase(), g);
-    return m;
-  }, [games]);
-  const nsoCount = games.filter(g => g.nso).length;
-  const fullCatalog = useMemo(() => {
-    const built = NSO_CATALOG.map(c => ({
-      name: c[0],
-      sys: c[1],
-      genre: c[2],
-      year: c[3],
-      dev: c[4],
-      custom: false
-    }));
-    const custom = (customNSO || []).map(c => ({
-      ...c,
-      custom: true
-    }));
-    return [...built, ...custom];
-  }, [customNSO]);
-  const list = useMemo(() => {
-    const arr = fullCatalog.filter(c => fSys === "all" || c.sys === fSys);
-    if (nSort === "year") arr.sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));else if (nSort === "svc") arr.sort((a, b) => String(b.svcDate || "").localeCompare(String(a.svcDate || "")));
-    return arr;
-  }, [fullCatalog, fSys, nSort]);
-  const doAdd = async item => {
-    setBusy(p => ({
-      ...p,
-      [item.name]: "loading"
-    }));
-    try {
-      const r = await onAdd(item);
-      setBusy(p => ({
-        ...p,
-        [item.name]: r && r.ok ? "done" : "error"
-      }));
-    } catch {
-      setBusy(p => ({
-        ...p,
-        [item.name]: "error"
-      }));
-    }
-  };
-  const submitCustom = () => {
-    if (!form.name.trim()) return;
-    onAddCustom({
-      name: form.name.trim(),
-      sys: form.sys,
-      genre: form.genre.trim(),
-      year: form.year,
-      dev: form.dev.trim(),
-      svcDate: form.svcDate
-    });
-    setForm({
-      name: "",
-      sys: "nes",
-      genre: "",
-      year: "",
-      dev: "",
-      svcDate: ""
-    });
-    setShowForm(false);
-  };
-  return /*#__PURE__*/React.createElement("div", {
-    className: "nso-view"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bk-card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bk-title"
-  }, "🔴 ألعاب Nintendo Switch Online"), /*#__PURE__*/React.createElement("p", {
-    className: "bk-desc"
-  }, "كتالوج الألعاب الكلاسيكية المتاحة عبر اشتراك Nintendo Switch Online (وExpansion Pack) — يشمل NES وSNES وNintendo 64 وGameCube وGame Boy وGame Boy Advance وSega Genesis. اضغط على أي لعبة لإضافتها مباشرة لمكتبتك مع محاولة جلب غلافها تلقائيًا. لديك حاليًا ", /*#__PURE__*/React.createElement("b", null, nsoCount), " لعبة NSO في مكتبتك."), /*#__PURE__*/React.createElement("a", {
-    className: "btn primary",
-    style: { display: "block", textAlign: "center", textDecoration: "none", marginBottom: 8 },
-    href: "https://www.nintendo.com/us/switch/online/nintendo-classics/",
-    target: "_blank",
-    rel: "noopener noreferrer"
-  }, "🔍 آخر الألعاب المضافة في موقع نينتندو"), /*#__PURE__*/React.createElement("button", {
-    className: "btn ghost",
-    onClick: () => setShowForm(s => !s)
-  }, showForm ? "إخفاء نموذج الإضافة" : "➕ أضف لعبة NSO غير موجودة (صدرت لاحقًا)"), showForm && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 12
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "grid2"
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "field"
-  }, /*#__PURE__*/React.createElement("span", null, "اسم اللعبة"), /*#__PURE__*/React.createElement("input", {
-    value: form.name,
-    onChange: e => setForm(p => ({
-      ...p,
-      name: e.target.value
-    })),
-    placeholder: "مثال: Super Mario Sunshine"
-  })), /*#__PURE__*/React.createElement("label", {
-    className: "field"
-  }, /*#__PURE__*/React.createElement("span", null, "النظام"), /*#__PURE__*/React.createElement("select", {
-    value: form.sys,
-    onChange: e => setForm(p => ({
-      ...p,
-      sys: e.target.value
-    }))
-  }, Object.keys(NSO_SYSTEMS).map(k => /*#__PURE__*/React.createElement("option", {
-    key: k,
-    value: k
-  }, NSO_SYSTEMS[k].icon, " ", NSO_SYSTEMS[k].label))))), /*#__PURE__*/React.createElement("div", {
-    className: "grid2"
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "field"
-  }, /*#__PURE__*/React.createElement("span", null, "التصنيف"), /*#__PURE__*/React.createElement("input", {
-    value: form.genre,
-    onChange: e => setForm(p => ({
-      ...p,
-      genre: e.target.value
-    })),
-    placeholder: "Platformer / RPG…"
-  })), /*#__PURE__*/React.createElement("label", {
-    className: "field"
-  }, /*#__PURE__*/React.createElement("span", null, "السنة"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    value: form.year,
-    onChange: e => setForm(p => ({
-      ...p,
-      year: e.target.value
-    }))
-  }))), /*#__PURE__*/React.createElement("label", {
-    className: "field"
-  }, /*#__PURE__*/React.createElement("span", null, "المطوّر"), /*#__PURE__*/React.createElement("input", {
-    value: form.dev,
-    onChange: e => setForm(p => ({
-      ...p,
-      dev: e.target.value
-    }))
-  })), /*#__PURE__*/React.createElement("label", {
-    className: "field"
-  }, /*#__PURE__*/React.createElement("span", null, "تاريخ الإضافة للخدمة"), /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    value: form.svcDate,
-    onChange: e => setForm(p => ({
-      ...p,
-      svcDate: e.target.value
-    }))
-  })), /*#__PURE__*/React.createElement("button", {
-    className: "btn primary",
-    style: {
-      marginTop: 10
-    },
-    onClick: submitCustom,
-    disabled: !form.name.trim()
-  }, "حفظ في الكتالوج"))), /*#__PURE__*/React.createElement("div", {
-    className: "filters"
-  }, /*#__PURE__*/React.createElement(FilterChip, {
-    active: fSys === "all",
-    onClick: () => setFSys("all")
-  }, "كل الأنظمة"), Object.keys(NSO_SYSTEMS).map(k => /*#__PURE__*/React.createElement(FilterChip, {
-    key: k,
-    active: fSys === k,
-    onClick: () => setFSys(k)
-  }, NSO_SYSTEMS[k].icon, " ", NSO_SYSTEMS[k].label))), /*#__PURE__*/React.createElement("div", {
-    className: "filters"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "sort-label"
-  }, "↕️ ترتيب:"), [["none", "افتراضي"], ["year", "سنة الإصدار"], ["svc", "تاريخ الإضافة للخدمة"]].map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
-    key: k,
-    active: nSort === k,
-    onClick: () => setNSort(k)
-  }, l))), /*#__PURE__*/React.createElement("div", {
-    className: "nso-list"
-  }, list.map((c, i) => {
-    const owned = inLibrary.get(c.name.trim().toLowerCase());
-    const st = busy[c.name];
-    return /*#__PURE__*/React.createElement("div", {
-      key: c.name + i,
-      className: "nso-row " + (owned ? "owned" : "")
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "nso-sys"
-    }, NSO_SYSTEMS[c.sys].icon, " ", NSO_SYSTEMS[c.sys].label), /*#__PURE__*/React.createElement("div", {
-      className: "nso-info"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "nso-name"
-    }, c.name, c.custom && /*#__PURE__*/React.createElement("span", {
-      className: "nso-custom-tag"
-    }, "مضافة يدويًا")), /*#__PURE__*/React.createElement("div", {
-      className: "nso-meta"
-    }, c.genre, " • ", c.year, " • ", c.dev, c.svcDate ? " • أُضيفت للخدمة: " + c.svcDate : "")), owned ? /*#__PURE__*/React.createElement("button", {
-      className: "btn ghost",
-      onClick: () => onOpen(owned)
-    }, "✓ في المكتبة") : /*#__PURE__*/React.createElement("button", {
-      className: "btn primary",
-      disabled: st === "loading",
-      onClick: () => doAdd(c)
-    }, st === "loading" ? "⏳ يضيف…" : st === "error" ? "✓ أُضيفت (بلا غلاف)" : "+ أضف للمكتبة"), c.custom && !owned && /*#__PURE__*/React.createElement("button", {
-      className: "btn ghost danger",
-      onClick: () => onRemoveCustom(c.id)
-    }, "حذف"));
-  })));
-}
-
 /* ---------- تبويب النسخ الاحتياطي ---------- */
 function fmtBytes(n) {
   if (n < 1024) return n + " B";
@@ -5075,6 +4954,51 @@ function mkSess(dateStr, hrs, src, note) {
 // يوفّق بين game.hours (المجموع الحقيقي) وبين sessions (التفصيل المؤرَّخ):
 // 1) يحذف الجلسات الوهمية (< 5 ثوانٍ)  2) يعوّض أي ساعات غير مسجّلة كجلسة مؤرَّخة
 // النتيجة: مجموع الجلسات = game.hours، فتظهر الإحصائيات الدورية مطابقة للواقع.
+/* ترحيل حقول لعبة واحدة للصيغة الحالية (type/hardware/displayType/NSO) —
+   يُستخدم عند التحميل الأول وعند الاستعادة من نسخة احتياطية، حتى لا تبقى
+   بيانات بصيغة قديمة إن استعاد المستخدم نسخة أثناء الجلسة بلا إعادة تحميل. */
+function migrateGame(g) {
+  let newG = { ...g };
+  let changed = false;
+  if (newG.type === "disc") { newG.type = "physical"; changed = true; }
+  if (newG.hardware === "console_emu") { newG.hardware = "emulator"; newG.emuDevice = newG.emuDevice || "console"; changed = true; }
+  if (newG.hardware === "pc_emu") { newG.hardware = "emulator"; newG.emuDevice = newG.emuDevice || "pc"; changed = true; }
+  /* ألعاب NSO ليست جهازًا أصليًا — تُلعب عبر محاكي نينتندو الرسمي على Switch/Switch 2 */
+  if (newG.nso) {
+    if (newG.hardware !== "emulator" || newG.emuDevice !== "nso") {
+      newG.hardware = "emulator";
+      newG.emuDevice = "nso";
+      newG.displayType = "";
+      changed = true;
+    }
+  } else if (newG.hardware === "nso") {
+    /* قيمة يتيمة خلّفتها نسخة سابقة على لعبة غير NSO فعليًا */
+    newG.hardware = "original";
+    changed = true;
+  }
+  if (newG.hardware === "emulator" && !newG.emuDevice) { newG.emuDevice = "pc"; changed = true; }
+  if (!newG.nso && newG.crt === true && newG.displayType !== "crt") { newG.displayType = "crt"; changed = true; }
+  if (newG.hardware === "original" && isRetroPlatform(newG.platform) && !newG.displayType) { newG.displayType = "hd"; changed = true; }
+  if (newG.nso && newG.type !== "subscription") {
+    newG.type = "subscription";
+    changed = true;
+  }
+  if (newG.nso && newG.nsoSystem && NSO_PLATFORM[newG.nsoSystem] && newG.platform === "Nintendo Switch") {
+    changed = true;
+    newG.platform = NSO_PLATFORM[newG.nsoSystem];
+    newG.playedOn = newG.playedOn || "Nintendo Switch 2";
+  }
+  return { game: newG, changed };
+}
+function migrateGamesList(list) {
+  let mig = false;
+  const out = (list || []).map(g => {
+    const r = migrateGame(g);
+    if (r.changed) mig = true;
+    return r.game;
+  });
+  return { games: out, changed: mig };
+}
 function reconcileGamesTime(list) {
   let changed = false;
   /* ترحيل لمرّة واحدة: تمييز أغلفة المجموعات.
@@ -5459,7 +5383,7 @@ function InsightsView({ games, covers, ach, lvl, xp }) {
     let exist = 0, hxp = 0, cxp = 0, rxp = 0;
     const mmap = {};
     games.forEach(g => {
-      if (!isShell(g)) exist += g.nso ? 1 : (g.type === "disc" ? 10 : 5);
+      if (!isShell(g)) exist += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
       (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill") { const v = XP_PER_HOUR * (Number(sx.ms) || 0) / 3600000; hxp += v; const mk = String(sx.at).slice(0, 7); mmap[mk] = (mmap[mk] || 0) + v; } });
       const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
       runs.forEach((r, i) => {
@@ -5497,15 +5421,13 @@ function BackupView({
   ach,
   onRestore,
   onRecompress,
-  bulk,
-  onBulkEnrich,
-  onImportNintendo,
   rawgKey,
   onSaveRawgKey,
+  bulk,
+  onBulkEnrich,
   ttbBulk,
   onBulkTtb
 }) {
-  const [nin, setNin] = useState(null);
   const [keyDraft, setKeyDraft] = useState(rawgKey || "");
   const [keySaved, setKeySaved] = useState(false);
   useEffect(() => {
@@ -5725,14 +5647,14 @@ function BackupView({
     /*#__PURE__*/React.createElement("div", { className: "th-row", style: { marginTop: 4 } },
       /*#__PURE__*/React.createElement("span", null, "🔔 تنبيه العدّاد المنسي",
         /*#__PURE__*/React.createElement("small", { style: { display: "block", fontWeight: 400, fontSize: 11, color: "var(--txt-3)", marginTop: 2 } },
-          notifPerm === "granted" ? "مُفعّلة — سننبّهك كل ساعة إذا بقي العدّاد شغّالًا"
+          notifPerm === "granted" ? "مُفعّلة — سننبّهك كل 5 دقائق إذا بقي العدّاد شغّالًا"
             : notifPerm === "denied" ? "مرفوضة — فعّلها من إعدادات المتصفّح للموقع"
             : "فعّلها لينبّهك التطبيق إذا نسيت إيقاف العدّاد")),
       notifPerm === "granted"
         ? /*#__PURE__*/React.createElement("span", { className: "pwa-badge on" }, "مُفعّلة")
         : /*#__PURE__*/React.createElement("button", { className: "btn ghost pwa-notif", onClick: askNotif, disabled: notifPerm === "denied" || notifPerm === "unsupported" }, notifPerm === "denied" ? "مرفوضة" : "تفعيل")),
     /*#__PURE__*/React.createElement("div", { className: "bk-desc", style: { marginTop: 8, fontSize: 11 } },
-      "💡 التنبيه يعمل حتى لو أغلقت التطبيق — عبر Service Worker يجدول تذكيرًا كل ساعة من لعبك.")),
+      "💡 التنبيه يشتغل كل 5 دقائق عبر Service Worker حتى لو صغّرت التطبيق أو خرجت منه. ملاحظة: إغلاق التطبيق بالكامل (تصفيته من الذاكرة) قد يوقف التنبيهات — هذا قيد من المتصفح نفسه لا يمكن تجاوزه بدون سيرفر Push حقيقي.")),
   /*#__PURE__*/React.createElement("div", {
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", { className: "bk-title" }, "🎨 المظهر"),
@@ -5805,32 +5727,15 @@ function BackupView({
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
-  }, "🎮 استيراد مكتبة نينتندو"), /*#__PURE__*/React.createElement("p", {
+  }, "🔄 تحديث ألعاب المكتبة وأغلفتها"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
-  }, "يضيف ألعاب نينتندو سويتش الرقمية إلى مكتبتك (يتخطّى المكرّر تلقائيًا، ولا يحذف شيئًا). بعده اضغط «تحديث بيانات كل الألعاب» لجلب السنة والغلاف."), /*#__PURE__*/React.createElement("button", {
-    className: "btn primary",
-    style: {
-      width: "100%"
-    },
-    onClick: async () => {
-      const r = await onImportNintendo();
-      setNin(r.added);
-    }
-  }, "🎮 استيراد وإضافة للمكتبة"), nin !== null && /*#__PURE__*/React.createElement("div", {
-    className: "auto-msg done"
-  }, nin ? "تمت إضافة " + nin + " لعبة جديدة ✓" : "كل الألعاب موجودة مسبقًا ✓")), /*#__PURE__*/React.createElement("div", {
-    className: "bk-card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bk-title"
-  }, "🧠 تحديث بيانات الألعاب"), /*#__PURE__*/React.createElement("p", {
-    className: "bk-desc"
-  }, "يجلب تلقائيًا التصنيف والسنة والمطوّر والوصف والغلاف لكل لعبة ناقصة، ويحفظها في المكتبة (RAWG عند توفّر المفتاح، وإلا ويكيبيديا/ويكيداتا)."), /*#__PURE__*/React.createElement("div", {
+  }, "يملأ التصنيف والسنة والمطوّر والوصف لكل لعبة ناقصة، ويجلب غلافًا مطابقًا لجهاز اللعبة نفسه — غلاف علبة Dreamcast للعبة على Dreamcast لا PS1 مثلًا (عبر قاعدة Libretro للأنظمة الكلاسيكية، أو RAWG/ويكيبيديا للحديثة). لا يغيّر الألعاب المكتملة البيانات أصلًا."), /*#__PURE__*/React.createElement("div", {
     className: "bk-actions"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn auto",
     onClick: onBulkEnrich,
     disabled: bulk.state === "running"
-  }, bulk.state === "running" ? "⏳ " + bulk.i + " / " + bulk.total : "🧠 تحديث بيانات كل الألعاب الناقصة")), bulk.state === "running" && /*#__PURE__*/React.createElement("div", {
+  }, bulk.state === "running" ? "⏳ " + bulk.i + " / " + bulk.total : "🔄 تحديث الألعاب الناقصة وأغلفتها")), bulk.state === "running" && /*#__PURE__*/React.createElement("div", {
     className: "bk-progress"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-progress-fill",
@@ -5995,6 +5900,34 @@ function App() {
   const [fFamily, setFFamily] = useState("all");
   const [fStatus, setFStatus] = useState("all");
   const [fType, setFType] = useState("all");
+  const [fHardware, setFHardware] = useState("all");
+  const [fCrt, setFCrt] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedGames, setSelectedGames] = useState(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  
+  const handleBulkSave = (changes) => {
+    const list = [...games];
+    let count = 0;
+    for (const g of list) {
+      if (selectedGames.has(g.id)) {
+        if (changes.hardware) g.hardware = changes.hardware;
+        if (changes.type) g.type = changes.type;
+        if (changes.status) g.status = changes.status;
+        if (changes.rating) g.rating = changes.rating;
+        if (changes.platform) g.platform = changes.platform;
+        if (changes.displayType) g.displayType = changes.displayType;
+        count++;
+      }
+    }
+    sset(KEY_GAMES, list);
+    setGames(list);
+    showToast("تم تعديل " + count + " ألعاب بنجاح ✓");
+    setSelectedGames(new Set());
+    setSelectionMode(false);
+    setBulkEditOpen(false);
+  };
+
   const [vmode, setVmode] = useState("grid");
   const [compGoal, setCompGoal] = useState(() => { try { const v = Number(localStorage.getItem("gamelib:compgoal")); return v > 0 ? v : 12; } catch (e) { return 12; } });
   const saveCompGoal = v => { v = Math.max(1, Math.round(Number(v) || 0)); setCompGoal(v); try { localStorage.setItem("gamelib:compgoal", String(v)); } catch (e) {} };
@@ -6034,25 +5967,23 @@ function App() {
     await sset(KEY_TIMER, t);
     try { swTimerSync(t); } catch (e) {}
   };
-  /* تذكير العدّاد المنسي — يعمل عبر إغلاق التطبيق والخلفية */
+  /* تذكير العدّاد المنسي — بانر داخل التطبيق كل 5 دقائق.
+     الإشعار الفعلي (نظام التشغيل + الاهتزاز بالخلفية) مسؤولية sw.js حصريًا
+     حتى لا يكون فيه نظامان يتضاربان بالتوقيت — هنا فقط بانر + اهتزاز فوري
+     أثناء انفتاح التطبيق. */
+  const NAG_MS = 5 * 60 * 1000;
   const [tNag, setTNag] = useState(null);
   useEffect(() => {
     const t = timer;
     if (!t || !t.running || !t.startedAt) { setTNag(null); return; }
     const el = t.accMs + (Date.now() - t.startedAt);
-    const hrs = Math.floor(el / 3600000);
-    // nagHour مخزَّن داخل العدّاد نفسه → يبقى بعد إعادة فتح التطبيق (بلا تكرار للتذكير نفسه)
-    const lastNag = Number(t.nagHour) || 0;
-    if (hrs >= 1 && hrs > lastNag) {
-      setTNag({ hrs, name: t.name, gameId: t.gameId });
-      persistTimer({ ...t, nagHour: hrs });
+    const bucket = Math.floor(el / NAG_MS);
+    // nagBucket مخزَّن داخل العدّاد نفسه → يبقى بعد إعادة فتح التطبيق (بلا تكرار للتذكير نفسه)
+    const lastNag = Number(t.nagBucket) || 0;
+    if (bucket >= 1 && bucket > lastNag) {
+      setTNag({ hrs: el / 3600000, name: t.name, gameId: t.gameId });
+      persistTimer({ ...t, nagBucket: bucket });
       try { if (navigator.vibrate) navigator.vibrate([250, 120, 250]); } catch (e) {}
-      try {
-        if (window.Notification && Notification.permission === "granted")
-          new Notification("⏱️ عدّاد اللعب لا يزال شغالًا", {
-            body: t.name + " — " + fmtHours(el / 3600000) + " حتى الآن. لا تنسَ إيقافه إذا خلصت!",
-            tag: "gamelib-timer", renotify: true, requireInteraction: true });
-      } catch (e) {}
     }
   }, [timer, tick]);
   /* عند العودة للتطبيق (فتح التبويب/التطبيق): افحص فورًا عدّادًا نُسي شغّالًا */
@@ -6072,7 +6003,7 @@ function App() {
     startedAt: Date.now(),
     accMs: 0,
     running: true,
-    nagHour: 0
+    nagBucket: 0
   });
   }, []);
   const pauseTimer = useCallback(() => {
@@ -6186,11 +6117,35 @@ function App() {
     setNsoSub(v);
     try { await sset(KEY_NSOSUB, v); } catch {}
   }, []);
-  const [bulk, setBulk] = useState({
-    state: "idle",
-    i: 0,
-    total: 0
-  });
+  const [bulk, setBulk] = useState({ state: "idle", i: 0, total: 0 });
+  const bulkEnrich = useCallback(async () => {
+    const targets = gamesRef.current.filter(g => !g.desc || !g.year || !g.developer || !coversRef.current[g.id]);
+    if (!targets.length) {
+      setBulk({ state: "done", i: 0, total: 0 });
+      return;
+    }
+    setBulk({ state: "running", i: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      try {
+        const r = await fetchGameEnrichment(t.name, rawgRef.current, t.platform);
+        if (Number(t.ttbMain) > 0 && r) delete r.ttbMain;
+        const { coverUrl, ...fields } = r;
+        let extra = {};
+        if (coverUrl && !coversRef.current[t.id]) {
+          const ok = await applyCover(t.id, coverUrl);
+          if (ok) extra.hasCover = true;
+        }
+        const cur = gamesRef.current;
+        const list = cur.map(g => g.id === t.id ? { ...g, ...fields, ...extra } : g);
+        setGames(list);
+        gamesRef.current = list;
+        await sset(KEY_GAMES, list);
+      } catch {}
+      setBulk({ state: "running", i: i + 1, total: targets.length });
+    }
+    setBulk({ state: "done", i: targets.length, total: targets.length });
+  }, [applyCover]);
   const [ttbBulk, setTtbBulk] = useState({ state: "idle", i: 0, total: 0, ok: 0 });
   const bulkTtb = useCallback(async () => {
     const key = rawgRef.current;
@@ -6218,57 +6173,6 @@ function App() {
     }
     try { await sset(KEY_GAMES, gamesRef.current); } catch {}
     setTtbBulk({ state: "done", i: targets.length, total: targets.length, ok });
-  }, []);
-  const bulkEnrich = useCallback(async () => {
-    const targets = gamesRef.current.filter(g => !g.desc || !g.year || !g.developer || !coversRef.current[g.id]);
-    if (!targets.length) {
-      setBulk({
-        state: "done",
-        i: 0,
-        total: 0
-      });
-      return;
-    }
-    setBulk({
-      state: "running",
-      i: 0,
-      total: targets.length
-    });
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i];
-      try {
-        const r = await fetchGameEnrichment(t.name, rawgRef.current, t.platform);
-        if (Number(t.ttbMain) > 0 && r) delete r.ttbMain;
-        const {
-          coverUrl,
-          ...fields
-        } = r;
-        let extra = {};
-        if (coverUrl && !coversRef.current[t.id]) {
-          const ok = await applyCover(t.id, coverUrl);
-          if (ok) extra.hasCover = true;
-        }
-        const cur = gamesRef.current;
-        const list = cur.map(g => g.id === t.id ? {
-          ...g,
-          ...fields,
-          ...extra
-        } : g);
-        setGames(list);
-        gamesRef.current = list;
-        await sset(KEY_GAMES, list);
-      } catch {}
-      setBulk({
-        state: "running",
-        i: i + 1,
-        total: targets.length
-      });
-    }
-    setBulk({
-      state: "done",
-      i: targets.length,
-      total: targets.length
-    });
   }, []);
   const handleEnrich = useCallback(async (id, patch) => {
     const {
@@ -6328,27 +6232,6 @@ function App() {
     };
   };
 
-  // ----- كتالوج NSO المخصّص (ألعاب يضيفها المستخدم يدويًا، مثل إصدارات مستقبلية) -----
-  const [customNSO, setCustomNSO] = useState([]);
-  useEffect(() => {
-    (async () => {
-      const c = await sget(KEY_NSO_CUSTOM);
-      if (Array.isArray(c)) setCustomNSO(c);
-    })();
-  }, []);
-  const addCustomNSO = async entry => {
-    const list = [...customNSO, {
-      ...entry,
-      id: makeId()
-    }];
-    setCustomNSO(list);
-    await sset(KEY_NSO_CUSTOM, list);
-  };
-  const removeCustomNSO = async id => {
-    const list = customNSO.filter(c => c.id !== id);
-    setCustomNSO(list);
-    await sset(KEY_NSO_CUSTOM, list);
-  };
 
   // تحميل الأغلفة تدريجيًا في الخلفية وبتزامن محدود (يحترم حدود معدّل التخزين السحابي
   // فلا تتكدّس عشرات الطلبات معًا وتُعلّق التطبيق). كل قراءة مغلّفة بحمايتها الخاصة.
@@ -6382,14 +6265,9 @@ function App() {
       try {
         list = await sget(KEY_GAMES);
         if (Array.isArray(list)) {
-          let mig = false;
-          list = list.map(g => {
-            if (g.nso && g.nsoSystem && NSO_PLATFORM[g.nsoSystem] && g.platform === "Nintendo Switch") {
-              mig = true;
-              return { ...g, platform: NSO_PLATFORM[g.nsoSystem], playedOn: g.playedOn || "Nintendo Switch 2" };
-            }
-            return g;
-          });
+          const migRes = migrateGamesList(list);
+          list = migRes.games;
+          let mig = migRes.changed;
           const rec = reconcileGamesTime(list);
           if (rec.changed) { list = rec.games; mig = true; }
           // ترحيل لمرة واحدة: ربط Sonic Generations كلعبة داخلية ضمن Sonic X Shadow Generations
@@ -6426,11 +6304,8 @@ function App() {
       } catch {
         list = null;
       }
-      if (!list || !Array.isArray(list) || list.length === 0) {
-        list = buildSeed();
-        try {
-          await sset(KEY_GAMES, list);
-        } catch {}
+      if (!list || !Array.isArray(list)) {
+        list = [];
       }
       setGames(list);
       gamesRef.current = list;
@@ -6606,7 +6481,7 @@ function App() {
   };
   const handleRestore = async (data, opts = {}) => {
     try {
-      const list = reconcileGamesTime(data.games).games;
+      const list = reconcileGamesTime(migrateGamesList(data.games).games).games;
       const cv = data.covers || {};
       await sset(KEY_GAMES, list);
       await Promise.all(games.map(g => cv[g.id] ? null : sdel(coverKey(g.id))));
@@ -6624,8 +6499,6 @@ function App() {
         }
         const ll = data.misc[KEY_LEVELLOG];
         if (ll && Array.isArray(ll.entries)) setLevelLog(ll.entries);
-        const cn = data.misc[KEY_NSO_CUSTOM];
-        if (Array.isArray(cn)) setCustomNSO(cn);
       }
       setGames(list);
       setCovers(cv);
@@ -6643,41 +6516,30 @@ function App() {
     }
   };
 
-  const importNintendo = useCallback(async () => {
-    const norm = x => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const cur = gamesRef.current;
-    const have = new Set(cur.map(g => norm(g.name)));
-    const add = [];
-    for (const [name, plat] of NINTENDO_LIB) {
-      if (have.has(norm(name))) continue;
-      have.add(norm(name));
-      add.push({
-        ...blankGame(),
-        id: makeId(),
-        name: name,
-        platform: plat,
-        type: "digital",
-        source: "Nintendo eShop",
-        status: "library"
-      });
-    }
-    if (add.length) {
-      const list = [...add, ...cur];
-      setGames(list);
-      gamesRef.current = list;
-      try { const ns = await sget(KEY_NSOSUB); if (ns && typeof ns === "object") setNsoSub({ plan: ns.plan || "expansion", expiry: ns.expiry || "" }); } catch {}
-      await sset(KEY_GAMES, list);
-    }
-    return {
-      added: add.length
-    };
-  }, []);
   const addPlaythrough = useCallback(async (id, entry, partIdx) => {
     const cur = gamesRef.current;
     const tg = cur.find(g => g.id === id);
     const newN = partIdx >= 1000 ? (((tg.goals || [])[partIdx - 1000] || {}).runs || []).length + 1 : partIdx >= 0 ? (((tg.parts || [])[partIdx] || {}).runs || []).length + 1 : ((tg && tg.playthroughs || []).length) + 1;
     const list = cur.map(g => {
       if (g.id !== id) return g;
+      if (partIdx < 0 && g.arcadeMode) {
+        const score = Math.max(0, Math.round(Number(entry.score) || 0));
+        const pts = [...(g.playthroughs || []), {
+          date: entry.date,
+          score: score,
+          hours: 0
+        }].map((p, i) => ({
+          ...p,
+          n: i + 1
+        }));
+        return {
+          ...g,
+          playthroughs: pts,
+          status: "completed",
+          dateCompleted: entry.date,
+          lastPlayed: nowISO()
+        };
+      }
       const entered = r1(entry.hours);
       if (partIdx >= 1000) return {
         ...g,
@@ -6968,13 +6830,15 @@ function App() {
       if (fPlat !== "all" && g.platform !== fPlat) return false;
       if (fStatus !== "all" && g.status !== fStatus) return false;
       if (fType !== "all" && g.type !== fType) return false;
+      if (fHardware !== "all" && g.hardware !== fHardware) return false;
+      if (fCrt && g.displayType !== "crt") return false;
       if (q && !(g.name.toLowerCase().includes(q) || (g.developer || "").toLowerCase().includes(q) || (g.genre || "").toLowerCase().includes(q) || (g.group || "").toLowerCase().includes(q) || (kidsMap[g.id] || []).some(k => k.name.toLowerCase().includes(q)))) return false;
       return true;
     });
     const s = [...arr];
     s.sort(cmpBy(sortBy));
     return s;
-  }, [games, search, fFamily, fStatus, fType, fPlat, sortBy, kidsMap, childIds]);
+  }, [games, search, fFamily, fStatus, fType, fHardware, fCrt, fPlat, sortBy, kidsMap, childIds]);
   const showNsoCard = useMemo(() => {
     return false; /* ألعاب NSO تظهر فرادى في المكتبة الآن — البطاقة المجمّعة صارت تكرارًا */
     if (!nsoGames.length || view !== "library") return false;
@@ -7016,7 +6880,7 @@ function App() {
     className: "brand-title"
   }, "مكتبتي الجيمرية"), /*#__PURE__*/React.createElement("div", {
     className: "brand-sub"
-  }, realGames(games).length - childIds.size - nsoGames.length + (nsoGames.length ? 1 : 0), " لعبة • ", rank[1], (() => { const st = playStreakOf(games); return st.cur > 0 ? " • 🔥" + st.cur : ""; })()))), /*#__PURE__*/React.createElement("div", {
+  }, realGames(games).length, " لعبة • ", rank[1], (() => { const st = playStreakOf(games); return st.cur > 0 ? " • 🔥" + st.cur : ""; })()))), /*#__PURE__*/React.createElement("div", {
     className: "mini-level",
     onClick: () => setView("stats")
   }, /*#__PURE__*/React.createElement("span", {
@@ -7036,7 +6900,7 @@ function App() {
   lastG && covers[lastG.id] && /*#__PURE__*/React.createElement("div", { className: "bg-hero", style: { backgroundImage: "url(" + covers[lastG.id] + ")" } }),
   lastG && (() => {
     const run = timer && timer.gameId === lastG.id;
-    const ms  = run ? (Date.now() - timer.start) : 0;
+    const ms  = run ? ((timer.accMs || 0) + (Date.now() - timer.startedAt)) : 0;
     const hh  = String(Math.floor(ms/3600000)).padStart(2,"0"), mm = String(Math.floor(ms/60000)%60).padStart(2,"0");
     const fam = FAMILIES[familyOf(lastG.platform)] || {};
     const lp  = lastG.lastPlayed ? relDay(lastG.lastPlayed) : "";
@@ -7122,7 +6986,14 @@ function App() {
       onBlur: () => { if (!search) setSearchOpen(false); },
       placeholder: "اسم اللعبة أو المطوّر…"
     }),
-    searchOpen && /*#__PURE__*/React.createElement("button", { className: "ctl", title: "إغلاق", onClick: () => { setSearch(""); setSearchOpen(false); } }, "✕")),
+    searchOpen && /*#__PURE__*/React.createElement("button", { className: "ctl", title: "إغلاق", onClick: () => { setSearch(""); setSearchOpen(false); } }, "✕"),
+    /*#__PURE__*/React.createElement("button", { 
+      className: "ctl", 
+      title: "تحديد", 
+      style: { background: selectionMode ? "#4ade80" : "", color: selectionMode ? "#000" : "", fontSize: "16px", marginLeft: "10px", width: "auto", padding: "0 10px" }, 
+      onClick: () => { if(selectionMode) { setSelectedGames(new Set()); setSelectionMode(false); } else setSelectionMode(true); } 
+    }, "✓ تحديد")
+  ),
   /*#__PURE__*/React.createElement("div", {
     className: "ftoolbar"
   }, /*#__PURE__*/React.createElement("button", {
@@ -7145,8 +7016,10 @@ function App() {
   }, fFamily !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", style: { borderColor: FAMILIES[fFamily].color }, onClick: () => { setFFamily("all"); setFPlat("all"); } }, FAMILIES[fFamily].label, " ✕"),
      fPlat !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFPlat("all") }, fPlat, " ✕"),
      fStatus !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", style: { borderColor: STATUSES[fStatus].color }, onClick: () => setFStatus("all") }, STATUSES[fStatus].icon, " ", STATUSES[fStatus].label, " ✕"),
-     fType !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFType("all") }, fType === "disc" ? "💿 ديسك" : "☁️ رقمي", " ✕"),
-     /*#__PURE__*/React.createElement("button", { className: "ft-chip ft-clear", onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); } }, "مسح الكل")), fSheet && /*#__PURE__*/React.createElement("div", {
+     fType !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFType("all") }, fType === "physical" ? "💿 أصلي" : fType === "digital" ? "☁️ رقمي" : fType === "downloaded" ? "💾 محملة" : "🎟️ اشتراك", " ✕"),
+      fHardware !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFHardware("all") }, fHardware === "original" ? "🎮 أصلي" : "🧪 محاكي", " ✕"),
+      fCrt && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFCrt(false) }, "📺 CRT", " ✕"),
+     /*#__PURE__*/React.createElement("button", { className: "ft-chip ft-clear", onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); setFHardware("all"); setFCrt(false); } }, "مسح الكل")), fSheet && /*#__PURE__*/React.createElement("div", {
     className: "modal-backdrop",
     onClick: () => setFSheet(false)
   }, /*#__PURE__*/React.createElement("div", {
@@ -7195,23 +7068,31 @@ function App() {
     color: STATUSES[k].color
   }, STATUSES[k].icon, " ", STATUSES[k].label)))), /*#__PURE__*/React.createElement("div", {
     className: "fsheet-sec"
-  }, /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "💿 النوع"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "💿 الملكية"), /*#__PURE__*/React.createElement("div", {
     className: "filters"
-  }, [["all", "الكل"], ["disc", "💿 ديسك"], ["digital", "☁️ رقمي"]].map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
+  }, [["all", "الكل"], ["physical", "💿 أصلي"], ["digital", "☁️ رقمي"], ["downloaded", "💾 محملة"], ["subscription", "🎟️ اشتراك"]].map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
     key: k,
     active: fType === k,
     onClick: () => setFType(k)
-  }, l)))), /*#__PURE__*/React.createElement("div", {
+  }, l))), /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "🎮 التشغيل"), /*#__PURE__*/React.createElement("div", {
+    className: "filters"
+  }, [["all", "الكل"], ["original", "🎮 أصلي"], ["emulator", "🧪 محاكي"]].map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
+    key: k,
+    active: fHardware === k,
+    onClick: () => setFHardware(k)
+  }, l))), /*#__PURE__*/React.createElement("div", {
+    className: "filters", style: { marginTop: 10 }
+  }, /*#__PURE__*/React.createElement(FilterChip, { active: fCrt, onClick: () => setFCrt(!fCrt), color: "#f5b942" }, "📺 تم اللعب على CRT فقط"))), /*#__PURE__*/React.createElement("div", {
     className: "fsheet-ft"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
-    onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); }
+    onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); setFHardware("all"); setFCrt(false); }
   }, "↩️ إعادة الضبط"), /*#__PURE__*/React.createElement("button", {
     className: "btn primary",
     onClick: () => setFSheet(false)
   }, "عرض ", filtered.length + (showNsoCard ? 1 : 0), " لعبة")))), /*#__PURE__*/React.createElement("div", {
     className: "count-line"
-  }, filtered.length + (showNsoCard ? 1 : 0), " من ", realGames(games).length - childIds.size - nsoGames.length + (nsoGames.length ? 1 : 0), " لعبة"), filtered.length === 0 && !showNsoCard ? /*#__PURE__*/React.createElement("div", {
+  }, filtered.length + (showNsoCard ? 1 : 0), " من ", games.length, " لعبة"), filtered.length === 0 && !showNsoCard ? /*#__PURE__*/React.createElement("div", {
     className: "empty"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7219,7 +7100,8 @@ function App() {
     }
   }, "🎲"), /*#__PURE__*/React.createElement("p", null, "لا توجد ألعاب مطابقة. جرّب فلترًا آخر أو أضف لعبة جديدة.")) : vmode === "saga" ? /*#__PURE__*/React.createElement(SagaView, { list: realGames(games), covers: covers, mode: theme.mode, onOpen: openGame }) : vmode === "atlas" ? /*#__PURE__*/React.createElement(AtlasView, { list: realGames(games), covers: covers, mode: theme.mode, onOpen: openGame }) : vmode === "sections" ? (() => {
     const card = g => /*#__PURE__*/React.createElement(GameCard, {
-      key: g.id, game: g, cover: covers[g.id], onOpen: openGame, bundleCount: (kidsMap[g.id] || []).length, bundleHours: (Number(g.hours) || 0) + (kidsMap[g.id] || []).reduce((t, k) => t + (Number(k.hours) || 0), 0)
+      key: g.id, game: g, cover: covers[g.id], onOpen: openGame, bundleCount: (kidsMap[g.id] || []).length, bundleHours: (Number(g.hours) || 0) + (kidsMap[g.id] || []).reduce((t, k) => t + (Number(k.hours) || 0), 0),
+      selectionMode: selectionMode, selected: selectedGames.has(g.id), onToggleSelect: id => { const ns = new Set(selectedGames); if (ns.has(id)) ns.delete(id); else ns.add(id); setSelectedGames(ns); }
     });
     const secs = [
       ["🔥 قيد اللعب", filtered.filter(g => g.status === "playing")],
@@ -7236,7 +7118,8 @@ function App() {
         /*#__PURE__*/React.createElement("div", { className: "grid" }, arr.map(card)))));
   })() : shelf ? (() => {
     const card = g => /*#__PURE__*/React.createElement(GameCard, {
-      key: g.id, game: g, cover: covers[g.id], onOpen: openGame, bundleCount: (kidsMap[g.id] || []).length, bundleHours: (Number(g.hours) || 0) + (kidsMap[g.id] || []).reduce((t, k) => t + (Number(k.hours) || 0), 0)
+      key: g.id, game: g, cover: covers[g.id], onOpen: openGame, bundleCount: (kidsMap[g.id] || []).length, bundleHours: (Number(g.hours) || 0) + (kidsMap[g.id] || []).reduce((t, k) => t + (Number(k.hours) || 0), 0),
+      selectionMode: selectionMode, selected: selectedGames.has(g.id), onToggleSelect: id => { const ns = new Set(selectedGames); if (ns.has(id)) ns.delete(id); else ns.add(id); setSelectedGames(ns); }
     });
     const bundles = filtered.filter(g => (kidsMap[g.id] || []).length > 0);
     const rest = filtered.filter(g => !(kidsMap[g.id] || []).length);
@@ -7315,11 +7198,10 @@ function App() {
     ach: ach,
     onRestore: handleRestore,
     onRecompress: recompressCovers,
-    bulk: bulk,
-    onBulkEnrich: bulkEnrich,
-    onImportNintendo: importNintendo,
     rawgKey: rawgKey,
     onSaveRawgKey: saveRawgKey,
+    bulk: bulk,
+    onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
     onBulkTtb: bulkTtb
   }), view === "library" && /*#__PURE__*/React.createElement("button", {
@@ -7337,7 +7219,7 @@ function App() {
     }, timer.running ? "⏱️ " : "⏸️ ", fmtHMS(el), /*#__PURE__*/React.createElement("span", null, timer.name));
   })(), tNag && /*#__PURE__*/React.createElement("div", {
     className: "timer-nag"
-  }, /*#__PURE__*/React.createElement("div", { className: "tnag-t" }, "⏰ عدّاد «", tNag.name, "» شغال منذ ", tNag.hrs, " ساعة — ما زلت تلعب؟"),
+  }, /*#__PURE__*/React.createElement("div", { className: "tnag-t" }, "⏰ عدّاد «", tNag.name, "» شغال منذ ", fmtHours(tNag.hrs), " — ما زلت تلعب؟"),
   /*#__PURE__*/React.createElement("div", { className: "timer-btns" },
     /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: () => setTNag(null) }, "✅ ما زلت ألعب"),
     /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { pauseTimer(); const tg = games.find(x => x.id === tNag.gameId); setTNag(null); if (tg) openGame(tg); } }, "⏸️ هولد وافتح اللعبة لأعدّل الوقت"))), nsoHub && /*#__PURE__*/React.createElement(NsoHub, {
@@ -7385,7 +7267,6 @@ function App() {
     onClose: () => setDetail(null)
   }), editing && /*#__PURE__*/React.createElement(GameModal, {
     allGames: games,
-    customNSO: customNSO,
     initial: editing.game,
     initialCover: editing.cover,
     parentOptions: games.some(y => y.parentId === editing.game.id) ? [] : games.filter(x => !x.parentId && x.id !== editing.game.id).map(x => ({ id: x.id, name: x.name })),

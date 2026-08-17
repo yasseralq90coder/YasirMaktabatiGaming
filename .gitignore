@@ -1,0 +1,7 @@
+# بيانات شخصية — لا تُرفع لمستودع عام أبدًا
+game-library-backup*.json
+games_editable*
+
+# ملفات مسوّدة/اختبار محلية
+scratch_*
+.claude/

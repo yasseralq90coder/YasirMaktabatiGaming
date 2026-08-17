@@ -1,0 +1,165 @@
+/* Service Worker — مكتبتي الجيمرية
+   ملف حقيقي (لا Blob) حتى يبقى مسجَّلًا بثبات بين الجلسات ويدعم GitHub Pages.
+   مسؤولياته: (1) تخزين مؤقت للعمل بلا إنترنت (2) تذكير العدّاد كل 5 دقائق
+   حتى لو كان التطبيق بالخلفية (3) محاولة أفضل عبر Periodic Background Sync
+   حين يكون التطبيق مثبَّتًا — ملاحظة: المتصفح هو من يقرر التوقيت الفعلي لها،
+   لا يوجد ضمان دقيقة-بدقيقة بدون سيرفر Push حقيقي. */
+
+const CACHE_VERSION = "v1";
+const CACHE_NAME = "gamelib-" + CACHE_VERSION;
+const SHELL_FILES = [
+  "./",
+  "./index.html",
+  "./manifest.json",
+  "./icon.svg",
+  "./games_db.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"
+];
+
+self.addEventListener("install", event => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache =>
+      Promise.all(SHELL_FILES.map(url => cache.add(url).catch(() => {})))
+    )
+  );
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    Promise.all([
+      caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))),
+      self.clients.claim()
+    ])
+  );
+});
+
+/* شبكة أولًا للملف الرئيسي (يلتقط التحديثات فورًا)، وتخزين مؤقت أولًا لباقي الملفات الثابتة */
+self.addEventListener("fetch", event => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  const isAppShell = url.origin === self.location.origin;
+
+  if (isAppShell && (url.pathname.endsWith("/") || url.pathname.endsWith("index.html"))) {
+    event.respondWith(
+      fetch(req).then(res => {
+        caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+        return res;
+      }).catch(() => caches.match(req).then(r => r || caches.match("./index.html")))
+    );
+    return;
+  }
+  event.respondWith(
+    caches.match(req).then(cached => cached || fetch(req).then(res => {
+      if (res && res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+      return res;
+    }).catch(() => cached))
+  );
+});
+
+/* ---------- تذكير العدّاد المنسي — كل 5 دقائق ما دام SW حيًا ---------- */
+const NAG_MS = 5 * 60 * 1000;
+const ICON = "icon.svg";
+let nagTimer = null;
+let nagState = null; // { startedAt, accMs, name }
+
+function fmtMin(ms) {
+  const total = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(total / 60), m = total % 60;
+  return (h ? h + "س " : "") + m + "د";
+}
+
+function clearNag() {
+  if (nagTimer) clearTimeout(nagTimer);
+  nagTimer = null;
+  nagState = null;
+}
+
+function fireNag() {
+  if (!nagState) return;
+  const el = nagState.accMs + (Date.now() - nagState.startedAt);
+  self.registration.showNotification("⏱️ عدّاد اللعب لا يزال شغالًا", {
+    body: nagState.name + " — " + fmtMin(el) + " حتى الآن. لا تنسَ إيقافه إذا خلصت!",
+    tag: "gamelib-timer-nag",
+    renotify: true,
+    requireInteraction: true,
+    vibrate: [250, 120, 250, 120, 250],
+    icon: ICON,
+    badge: ICON
+  });
+  scheduleNext();
+}
+
+function scheduleNext() {
+  if (!nagState) return;
+  if (nagTimer) clearTimeout(nagTimer);
+  const elapsed = nagState.accMs + (Date.now() - nagState.startedAt);
+  const nextBucket = Math.floor(elapsed / NAG_MS) + 1;
+  const fireIn = Math.max(1000, nextBucket * NAG_MS - elapsed);
+  nagTimer = setTimeout(fireNag, fireIn);
+}
+
+self.addEventListener("message", event => {
+  const d = event.data || {};
+  if (d.type === "timer-start") {
+    clearNag();
+    nagState = { startedAt: d.startedAt, accMs: d.accMs || 0, name: d.name || "اللعبة" };
+    scheduleNext();
+  } else if (d.type === "timer-stop") {
+    clearNag();
+  }
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+      for (const c of list) if ("focus" in c) return c.focus();
+      if (self.clients.openWindow) return self.clients.openWindow("./index.html");
+    })
+  );
+});
+
+/* ---------- Periodic Background Sync — محاولة إضافية أفضل جهد ----------
+   يعمل فقط للتطبيقات المثبَّتة، والمتصفح (لا الموقع) يقرر التوقيت الفعلي.
+   يقرأ حالة العدّاد المحفوظة في IndexedDB مباشرةً لأن SW قد يكون أُعيد
+   تشغيله وفقد nagState الموجود في الذاكرة. */
+function readTimerFromIDB() {
+  return new Promise(resolve => {
+    try {
+      const req = indexedDB.open("gamelib_db", 1);
+      req.onerror = () => resolve(null);
+      req.onsuccess = () => {
+        try {
+          const db = req.result;
+          const tx = db.transaction("kv", "readonly");
+          const g = tx.objectStore("kv").get("gamelib:timer");
+          g.onsuccess = () => { try { resolve(g.result ? JSON.parse(g.result) : null); } catch { resolve(null); } };
+          g.onerror = () => resolve(null);
+        } catch { resolve(null); }
+      };
+    } catch { resolve(null); }
+  });
+}
+
+self.addEventListener("periodicsync", event => {
+  if (event.tag !== "gamelib-nag-check") return;
+  event.waitUntil((async () => {
+    const t = await readTimerFromIDB();
+    if (!t || !t.running || !t.startedAt) return;
+    const el = (t.accMs || 0) + (Date.now() - t.startedAt);
+    if (el >= NAG_MS) {
+      self.registration.showNotification("⏱️ عدّاد اللعب لا يزال شغالًا", {
+        body: (t.name || "اللعبة") + " — " + fmtMin(el) + " حتى الآن. لا تنسَ إيقافه إذا خلصت!",
+        tag: "gamelib-timer-nag",
+        renotify: true,
+        requireInteraction: true,
+        vibrate: [250, 120, 250, 120, 250],
+        icon: ICON,
+        badge: ICON
+      });
+    }
+  })());
+});
