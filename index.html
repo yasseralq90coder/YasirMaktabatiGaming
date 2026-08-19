@@ -2499,6 +2499,13 @@ function GameDetail({
     const add = (Number(pend.h) || 0) + (Number(pend.m) || 0) / 60;
     if (add > 0) await onAddPlayTime(game.id, add, selPart, (pend.note || "").trim());
     const pi = selPart;
+    if (pi < 0 && game.arcadeMode) {
+      /* ألعاب الأركيد تُعتمَد بنتيجة لا بساعات — الساعة سُجّلت أعلاه كوقت لعب عادي،
+         الآن نفتح نموذج النتيجة بدل الاعتماد المباشر بالساعات */
+      setPend(null);
+      openComplete();
+      return;
+    }
     const n = await onCompleteTimer(game.id, today, pi);
     setPend(null);
     if (n) setCongrats({
@@ -3242,6 +3249,35 @@ function GameModal({
         placeholder: "مثال: Retroid Pocket"
       })))
   ];
+  const renderOwnershipQuick = () => [
+    /*#__PURE__*/React.createElement("div", { className: "seg-label", key: "own-l" }, "نوع الملكية"),
+    /*#__PURE__*/React.createElement("div", {
+      className: "seg", key: "own-s", style: { display: "flex", flexWrap: "wrap", gap: "6px" }
+    },
+      /*#__PURE__*/React.createElement("button", {
+        className: g.type === "physical" ? "on" : "",
+        onClick: () => set("type", "physical")
+      }, "💿 ملموس أصلي"),
+      /*#__PURE__*/React.createElement("button", {
+        className: g.type === "digital" ? "on" : "",
+        onClick: () => set("type", "digital")
+      }, "☁️ رقمي مملوك"),
+      /*#__PURE__*/React.createElement("button", {
+        className: g.type === "downloaded" ? "on" : "",
+        onClick: () => set("type", "downloaded")
+      }, "💾 محملة (SD/HDD)"),
+      /*#__PURE__*/React.createElement("button", {
+        className: g.type === "subscription" ? "on" : "",
+        onClick: () => set("type", "subscription")
+      }, "🎟️ خدمة اشتراك")),
+    /*#__PURE__*/React.createElement("label", { className: "check", key: "arcade-cb" },
+      /*#__PURE__*/React.createElement("input", {
+        type: "checkbox",
+        checked: !!g.arcadeMode,
+        onChange: e => set("arcadeMode", e.target.checked)
+      }),
+      /*#__PURE__*/React.createElement("span", null, "🕹️ ", /*#__PURE__*/React.createElement("b", null, "أسلوب أركيد"), " — تختيمها بأعلى نتيجة لا بساعات القصة"))
+  ];
   const pickImage = async e => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -3382,6 +3418,7 @@ function GameModal({
           onClick: () => setWizardStep("name")
         }, "‹ رجوع للاسم"),
         renderPlayback(),
+        renderOwnershipQuick(),
         /*#__PURE__*/React.createElement("button", {
           className: "btn primary",
           style: { marginTop: 10, width: "100%" },
