@@ -2742,7 +2742,24 @@ function GameDetail({
   }, timer.running ? "⏸️ هولد" : "▶️ متابعة"), /*#__PURE__*/React.createElement("button", {
     className: "btn primary",
     onClick: endSession
-  }, "⏹️ إنهاء"))) : /*#__PURE__*/React.createElement("div", {
+  }, "⏹️ إنهاء"), game.arcadeMode && /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    onClick: openAttempt
+  }, "🎯 سجّل نتيجة")),
+  game.arcadeMode && attempt && /*#__PURE__*/React.createElement("div", { className: "comp-form" },
+    /*#__PURE__*/React.createElement("div", { className: "comp-row" },
+      /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", null, "🎯 النتيجة"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number", min: 0, step: "1", value: attempt.score, autoFocus: true,
+          onChange: e => setAttempt({ ...attempt, score: e.target.value })
+        })),
+      /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", null, "التاريخ"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "date", value: attempt.date,
+          onChange: e => setAttempt({ ...attempt, date: e.target.value })
+        }))),
+    /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: confirmAttempt }, "✅ حفظ"),
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => setAttempt(null) }, "إلغاء"))) : /*#__PURE__*/React.createElement("div", {
     className: "timer-idle"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn primary",
