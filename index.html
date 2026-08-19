@@ -2373,6 +2373,8 @@ function GameDetail({
   onAddPlaythrough,
   onCompleteTimer,
   onRemovePlaythrough,
+  onLogScoreAttempt,
+  onRemoveScoreAttempt,
   onUpdateNote,
   onSetRunMeta,
   onAddPart,
@@ -2426,11 +2428,24 @@ function GameDetail({
   const pts = game.playthroughs || [];
   const totalH = pts.reduce((s, p) => s + (Number(p.hours) || 0), 0);
   const today = localDay(new Date());
+  const attempts = game.scoreAttempts || [];
+  const bestAttempt = attempts.reduce((m, a) => Math.max(m, Number(a.score) || 0), 0);
   const openComplete = () => setComp({
     date: today,
     hours: "",
-    score: ""
+    score: game.arcadeMode && bestAttempt > 0 ? String(bestAttempt) : ""
   });
+  const [attempt, setAttempt] = useState(null);
+  const openAttempt = () => setAttempt({ date: today, score: "" });
+  const confirmAttempt = () => {
+    if (!(Number(attempt.score) > 0)) {
+      setMsg("أدخل النتيجة أولًا");
+      return;
+    }
+    onLogScoreAttempt(game.id, attempt);
+    setAttempt(null);
+    setMsg("");
+  };
   const confirmComplete = async () => {
     const pi = selPart;
     if (pi < 0 && game.arcadeMode) {
@@ -2973,7 +2988,30 @@ function GameDetail({
       color: STATUSES[k].color
     } : null,
     onClick: () => pickStatus(k)
-  }, STATUSES[k].icon, " ", STATUSES[k].label))), /*#__PURE__*/React.createElement("div", {
+  }, STATUSES[k].icon, " ", STATUSES[k].label))),
+  game.arcadeMode && /*#__PURE__*/React.createElement("div", { className: "runs-box" },
+    /*#__PURE__*/React.createElement("div", { className: "runs-head" },
+      /*#__PURE__*/React.createElement("span", null, "🎯 محاولات مسجّلة ", attempts.length ? "(" + attempts.length + ")" : ""),
+      bestAttempt > 0 && /*#__PURE__*/React.createElement("b", null, "أعلى نتيجة: ", bestAttempt.toLocaleString())),
+    attempts.map((a, i) => /*#__PURE__*/React.createElement("div", { key: i, className: "run-row" },
+      /*#__PURE__*/React.createElement("span", { className: "run-info" }, a.date, " • 🎯 ", Number(a.score || 0).toLocaleString()),
+      /*#__PURE__*/React.createElement("button", { className: "run-del", onClick: () => onRemoveScoreAttempt(game.id, i), title: "حذف" }, "✕"))),
+    attempt ? /*#__PURE__*/React.createElement("div", { className: "comp-form" },
+      /*#__PURE__*/React.createElement("div", { className: "comp-row" },
+        /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", null, "🎯 النتيجة"),
+          /*#__PURE__*/React.createElement("input", {
+            type: "number", min: 0, step: "1", value: attempt.score,
+            onChange: e => setAttempt({ ...attempt, score: e.target.value })
+          })),
+        /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", null, "التاريخ"),
+          /*#__PURE__*/React.createElement("input", {
+            type: "date", value: attempt.date,
+            onChange: e => setAttempt({ ...attempt, date: e.target.value })
+          }))),
+      /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: confirmAttempt }, "✅ حفظ"),
+      /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => setAttempt(null) }, "إلغاء"))
+      : /*#__PURE__*/React.createElement("button", { className: "btn ghost", style: { width: "100%", marginTop: 6 }, onClick: openAttempt }, "📝 سجّل نتيجة")),
+  /*#__PURE__*/React.createElement("div", {
     className: "runs-box"
   }, /*#__PURE__*/React.createElement("div", {
     className: "runs-head"
@@ -6648,6 +6686,15 @@ function App() {
       game: list.find(x => x.id === gameId)
     } : p);
   }, []);
+  /* محاولات نتيجة الأركيد — سجلّ منفصل عن التختيمات، لا يغيّر حالة اللعبة */
+  const logScoreAttempt = useCallback((gameId, entry) => mutateGame(gameId, g => ({
+    ...g,
+    scoreAttempts: [...(g.scoreAttempts || []), { date: entry.date, score: Math.max(0, Math.round(Number(entry.score) || 0)) }]
+  })), [mutateGame]);
+  const removeScoreAttempt = useCallback((gameId, idx) => mutateGame(gameId, g => ({
+    ...g,
+    scoreAttempts: (g.scoreAttempts || []).filter((_, i) => i !== idx)
+  })), [mutateGame]);
   const applyRun = (g, ref, fn) => ref && (ref.t === "p" || ref.t === "g") ? {
     ...g,
     [ref.t === "g" ? "goals" : "parts"]: (g[ref.t === "g" ? "goals" : "parts"] || []).map((pt, pi) => pi !== ref.pi ? pt : {
@@ -7254,6 +7301,8 @@ function App() {
     onAddPlaythrough: addPlaythrough,
     onCompleteTimer: completeFromTimer,
     onRemovePlaythrough: (id, idx) => deleteRun(id, { t: "m", i: idx }),
+    onLogScoreAttempt: logScoreAttempt,
+    onRemoveScoreAttempt: removeScoreAttempt,
     onUpdateNote: updateNote,
     onSetRunMeta: setRunMeta,
     onAddPart: addPart,
