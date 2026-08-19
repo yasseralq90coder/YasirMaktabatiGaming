@@ -1648,6 +1648,98 @@ async function libretroCover(name, platform) {
   return "";
 }
 
+/* ══════════ RetroAchievements — الرقم القياسي العالمي (أفضل جهد) ══════════
+   يتطلب اسم مستخدم ومفتاح RA (مجانيان من إعدادات حسابك في retroachievements.org).
+   المطابقة بالاسم غير مضمونة 100% — أي فشل هنا يُعامَل بلطف (يعرض رسالة، لا يكسر شيء). */
+const RA_BASE = "https://retroachievements.org/API/";
+const RA_CACHE = { consoles: null, games: new Map() };
+const RA_ALIASES = {
+  "Sega Dreamcast": ["dreamcast"],
+  "Sega Saturn": ["saturn"],
+  "Sega Genesis": ["genesis", "megadrive", "mega drive"],
+  "Sega Master System": ["mastersystem", "master system"],
+  "Sega Game Gear": ["gamegear", "game gear"],
+  "Neo Geo": ["neogeo", "neo geo"],
+  "Arcade": ["arcade"],
+  "PlayStation": ["playstation", "psx"],
+  "PlayStation 2": ["playstation2", "ps2"],
+  "PSP": ["playstationportable", "psp"],
+  "Nintendo 64": ["nintendo64", "n64"],
+  "SNES": ["snes", "superfamicom", "super nintendo"],
+  "NES": ["nintendoentertainmentsystem", "famicom", "nes"],
+  "Nintendo GameCube": ["gamecube"],
+  "Nintendo DS": ["nintendods"],
+  "Game Boy Advance": ["gameboyadvance", "gba"],
+  "Game Boy / Color": ["gameboy", "gameboycolor"],
+  "TurboGrafx-16": ["turbografx", "pcengine"],
+  "Atari 2600": ["atari2600"],
+  "3DO": ["3do"]
+};
+async function raFetch(path, user, key) {
+  const sep = path.includes("?") ? "&" : "?";
+  const r = await fetch(RA_BASE + path + sep + "z=" + encodeURIComponent(user) + "&y=" + encodeURIComponent(key));
+  if (!r.ok) throw new Error("ra-http-" + r.status);
+  return r.json();
+}
+async function raConsoles(user, key) {
+  if (RA_CACHE.consoles) return RA_CACHE.consoles;
+  try {
+    const cached = await sget("gamelib:raconsoles");
+    if (Array.isArray(cached) && cached.length) { RA_CACHE.consoles = cached; return cached; }
+  } catch {}
+  const j = await raFetch("API_GetConsoleIDs.php", user, key);
+  const list = Array.isArray(j) ? j : [];
+  RA_CACHE.consoles = list;
+  try { await sset("gamelib:raconsoles", list); } catch {}
+  return list;
+}
+function raMatchConsoleId(consoles, platformName) {
+  const wanted = RA_ALIASES[platformName];
+  if (!wanted) return null;
+  for (const c of consoles) {
+    const cn = lrNorm(c.Name || c.name || "");
+    if (wanted.some(w => cn.includes(lrNorm(w)))) return c.ID != null ? c.ID : c.id;
+  }
+  return null;
+}
+async function raGames(consoleId, user, key) {
+  if (RA_CACHE.games.has(consoleId)) return RA_CACHE.games.get(consoleId);
+  const cacheKey = "gamelib:ragames:" + consoleId;
+  try {
+    const cached = await sget(cacheKey);
+    if (Array.isArray(cached) && cached.length) { RA_CACHE.games.set(consoleId, cached); return cached; }
+  } catch {}
+  const j = await raFetch("API_GetGameList.php?i=" + consoleId, user, key);
+  const list = Array.isArray(j) ? j : [];
+  RA_CACHE.games.set(consoleId, list);
+  try { await sset(cacheKey, list); } catch {}
+  return list;
+}
+function raMatchGame(list, name) {
+  for (const v of lrVariants(name)) {
+    const hit = list.find(g => lrNorm(g.Title || g.title || "") === v);
+    if (hit) return hit;
+  }
+  const nv = lrNorm(name);
+  if (!nv) return null;
+  return list.find(g => { const t = lrNorm(g.Title || g.title || ""); return t && (t.includes(nv) || nv.includes(t)); }) || null;
+}
+async function raWorldRecord(gameId, user, key) {
+  const lbs = await raFetch("API_GetGameLeaderboards.php?i=" + gameId + "&c=1", user, key);
+  const lb = lbs && Array.isArray(lbs.Results) && lbs.Results[0];
+  if (!lb) return null;
+  const lbId = lb.ID != null ? lb.ID : lb.id;
+  const entries = await raFetch("API_GetLeaderboardEntries.php?i=" + lbId + "&c=1", user, key);
+  const top = entries && Array.isArray(entries.Results) && entries.Results[0];
+  if (!top) return null;
+  return {
+    leaderboardTitle: lb.Title || lb.title || "",
+    score: top.FormattedScore || top.Score || top.score || "",
+    holder: top.User || top.user || "؟",
+    url: "https://retroachievements.org/leaderboardinfo.php?i=" + lbId
+  };
+}
+
 function compressFromUrl(url, maxW = COVER_W, quality = COVER_Q) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -1713,6 +1805,8 @@ const KEY_INTERNAL_BACKUP = "gamelib:internalbackup";
 const KEY_IMGVER = "gamelib:imgver";
 const IMG_VER = 2;
 const KEY_RAWG = "gamelib:rawgkey";
+const KEY_RA_USER = "gamelib:rauser";
+const KEY_RA_KEY = "gamelib:rakey";
 const KEY_TIMER = "gamelib:timer";
 const KEY_NSOSUB = "gamelib:nsosub";
 const KEY_THEME = "gamelib:theme";
@@ -2413,6 +2507,8 @@ function GameDetail({
   onClose,
   onEnrich,
   rawgKey,
+  raUser,
+  raKey,
   timer,
   onTimerStart,
   onTimerPause,
@@ -2494,6 +2590,25 @@ function GameDetail({
     onLogScoreAttempt(game.id, attempt);
     setAttempt(null);
     setMsg("");
+  };
+  const [raState, setRaState] = useState("idle"); // idle | loading | done | unsupported | nomatch | nolb | error
+  const [raResult, setRaResult] = useState(null);
+  const fetchWorldRecord = async () => {
+    if (!raUser || !raKey) { setMsg("أضف اسم مستخدم ومفتاح RetroAchievements من الإعدادات أولًا"); return; }
+    setRaState("loading");
+    setRaResult(null);
+    try {
+      const consoles = await raConsoles(raUser, raKey);
+      const cid = raMatchConsoleId(consoles, game.platform);
+      if (!cid) { setRaState("unsupported"); return; }
+      const glist = await raGames(cid, raUser, raKey);
+      const match = raMatchGame(glist, game.name);
+      if (!match) { setRaState("nomatch"); return; }
+      const rec = await raWorldRecord(match.ID != null ? match.ID : match.id, raUser, raKey);
+      if (!rec) { setRaState("nolb"); return; }
+      setRaResult(rec);
+      setRaState("done");
+    } catch (e) { setRaState("error"); }
   };
   const confirmComplete = async () => {
     const pi = selPart;
@@ -3089,7 +3204,18 @@ function GameDetail({
           }))),
       /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: confirmAttempt }, "✅ حفظ"),
       /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => setAttempt(null) }, "إلغاء"))
-      : /*#__PURE__*/React.createElement("button", { className: "btn ghost", style: { width: "100%", marginTop: 6 }, onClick: openAttempt }, "📝 سجّل نتيجة")),
+      : /*#__PURE__*/React.createElement("button", { className: "btn ghost", style: { width: "100%", marginTop: 6 }, onClick: openAttempt }, "📝 سجّل نتيجة"),
+    /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost", style: { width: "100%", marginTop: 6 },
+      onClick: fetchWorldRecord, disabled: raState === "loading"
+    }, raState === "loading" ? "⏳ جاري البحث…" : "🌍 جلب الرقم القياسي العالمي"),
+    raState === "done" && raResult && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" },
+      "🌍 ", raResult.leaderboardTitle, ": ", /*#__PURE__*/React.createElement("b", null, raResult.score), " — ", raResult.holder, " ",
+      /*#__PURE__*/React.createElement("a", { href: raResult.url, target: "_blank", rel: "noopener noreferrer", style: { color: "#a78bfa" } }, "عرض")),
+    raState === "unsupported" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 جهاز اللعبة غير مدعوم في RetroAchievements"),
+    raState === "nomatch" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 ما لقينا مطابقة لاسم اللعبة — جرّب تعديل الاسم"),
+    raState === "nolb" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 اللعبة موجودة لكن بلا لوحة صدارة نتائج"),
+    raState === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, "🌍 تعذّر الاتصال — تحقق من المفتاح")),
   /*#__PURE__*/React.createElement("div", {
     className: "runs-box"
   }, /*#__PURE__*/React.createElement("div", {
@@ -5594,6 +5720,9 @@ function BackupView({
   onRecompress,
   rawgKey,
   onSaveRawgKey,
+  raUser,
+  raKey,
+  onSaveRaCreds,
   bulk,
   onBulkEnrich,
   ttbBulk,
@@ -5604,6 +5733,10 @@ function BackupView({
   useEffect(() => {
     setKeyDraft(rawgKey || "");
   }, [rawgKey]);
+  const [raUserDraft, setRaUserDraft] = useState(raUser || "");
+  const [raKeyDraft, setRaKeyDraft] = useState(raKey || "");
+  const [raSaved, setRaSaved] = useState(false);
+  useEffect(() => { setRaUserDraft(raUser || ""); setRaKeyDraft(raKey || ""); }, [raUser, raKey]);
   const [msg, setMsg] = useState(null); // {type, text}
   const [pending, setPending] = useState(null); // parsed data awaiting confirm
   const [showText, setShowText] = useState(false);
@@ -5898,6 +6031,34 @@ function BackupView({
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
+  }, "🌍 ربط RetroAchievements (أرقام قياسية عالمية)"), /*#__PURE__*/React.createElement("p", {
+    className: "bk-desc"
+  }, "لعرض أعلى نتيجة عالمية مسجَّلة لألعاب الأركيد (Neo Geo، Dreamcast، Arcade وغيرها) في صفحة اللعبة. اسم المستخدم ومفتاح API مجانيان من ", /*#__PURE__*/React.createElement("a", {
+    href: "https://retroachievements.org/settings", target: "_blank", rel: "noopener noreferrer", style: { color: "#a78bfa" }
+  }, "إعدادات حسابك في retroachievements.org"), ". مطابقة اسم اللعبة أفضل جهد — قد لا تنجح لكل لعبة. يُحفظان محليًا في جهازك فقط."),
+  /*#__PURE__*/React.createElement("div", { className: "grid2" },
+    /*#__PURE__*/React.createElement("label", { className: "field" }, /*#__PURE__*/React.createElement("span", null, "اسم المستخدم"),
+      /*#__PURE__*/React.createElement("input", {
+        value: raUserDraft,
+        onChange: e => { setRaUserDraft(e.target.value); setRaSaved(false); },
+        placeholder: "RA Username…", style: { direction: "ltr", textAlign: "left" }
+      })),
+    /*#__PURE__*/React.createElement("label", { className: "field" }, /*#__PURE__*/React.createElement("span", null, "مفتاح API"),
+      /*#__PURE__*/React.createElement("input", {
+        value: raKeyDraft,
+        onChange: e => { setRaKeyDraft(e.target.value); setRaSaved(false); },
+        placeholder: "RA API Key…", style: { direction: "ltr", textAlign: "left" }
+      }))),
+  /*#__PURE__*/React.createElement("button", {
+    className: "btn primary",
+    onClick: () => { onSaveRaCreds(raUserDraft.trim(), raKeyDraft.trim()); setRaSaved(true); },
+    disabled: raUserDraft.trim() === (raUser || "") && raKeyDraft.trim() === (raKey || "")
+  }, "حفظ"), (raSaved || (raUser && raKey)) && /*#__PURE__*/React.createElement("div", {
+    className: "auto-msg done"
+  }, (raUser && raKey) ? "الحساب مُفعّل ✓" : "—")), /*#__PURE__*/React.createElement("div", {
+    className: "bk-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bk-title"
   }, "🔄 تحديث ألعاب المكتبة وأغلفتها"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
   }, "يملأ التصنيف والسنة والمطوّر والوصف لكل لعبة ناقصة، ويجلب غلافًا مطابقًا لجهاز اللعبة نفسه — غلاف علبة Dreamcast للعبة على Dreamcast لا PS1 مثلًا (عبر قاعدة Libretro للأنظمة الكلاسيكية، أو RAWG/ويكيبيديا للحديثة). لا يغيّر الألعاب المكتملة البيانات أصلًا."), /*#__PURE__*/React.createElement("div", {
@@ -6115,6 +6276,18 @@ function App() {
     gamesRef.current = games;
   }, [games]);
   const [rawgKey, setRawgKey] = useState("");
+  const [raUser, setRaUser] = useState("");
+  const [raKey, setRaKey] = useState("");
+  useEffect(() => {
+    (async () => {
+      try { const u = await sget(KEY_RA_USER); if (typeof u === "string") setRaUser(u); } catch {}
+      try { const k = await sget(KEY_RA_KEY); if (typeof k === "string") setRaKey(k); } catch {}
+    })();
+  }, []);
+  const saveRaCreds = useCallback(async (u, k) => {
+    setRaUser(u); setRaKey(k);
+    try { await sset(KEY_RA_USER, u); await sset(KEY_RA_KEY, k); } catch {}
+  }, []);
   const [timer, setTimer] = useState(null);
   const [tick, setTick] = useState(0);
   const timerRef = useRef(null);
@@ -7403,6 +7576,9 @@ function App() {
     onRecompress: recompressCovers,
     rawgKey: rawgKey,
     onSaveRawgKey: saveRawgKey,
+    raUser: raUser,
+    raKey: raKey,
+    onSaveRaCreds: saveRaCreds,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
@@ -7448,6 +7624,8 @@ function App() {
     liveColor: theme.live,
     themeMode: theme.mode,
     rawgKey: rawgKey,
+    raUser: raUser,
+    raKey: raKey,
     timer: timer,
     onTimerStart: startTimer,
     onTimerPause: pauseTimer,
