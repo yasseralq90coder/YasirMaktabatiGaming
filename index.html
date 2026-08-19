@@ -537,6 +537,14 @@ const TRACKS = [{
   blurb: "ألعاب أنهيتها",
   metric: g => g.filter(x => x.status === "completed").length
 }, {
+  id: "arcade_runs",
+  icon: "🕹️",
+  title: "صياد النقاط",
+  unit: "تختيمة",
+  start: 3,
+  blurb: "تختيمات أركيد تلقائية (كل 3 ساعات لعب)",
+  metric: g => g.filter(x => x.arcadeMode).reduce((n, x) => n + (x.playthroughs || []).length, 0)
+}, {
   id: "crt",
   icon: "📺",
   title: "عاشق الكلاسيكية",
@@ -717,6 +725,34 @@ const BADGES = [{
   desc: "ختمت لعبة في نفس يوم إضافتها",
   hidden: true,
   check: g => g.some(x => (x.playthroughs || []).some(p => p.date && x.dateAdded && String(p.date).slice(0, 10) === String(x.dateAdded).slice(0, 10)))
+}, {
+  id: "arcade_first",
+  icon: "🕹️",
+  title: "أول عملة",
+  desc: "أول تختيمة أركيد تلقائية (3 ساعات لعب)",
+  hidden: true,
+  check: g => g.some(x => x.arcadeMode && (x.playthroughs || []).length > 0)
+}, {
+  id: "arcade_millionaire",
+  icon: "🎯",
+  title: "مليونير النقاط",
+  desc: "وصلت لنتيجة مليون فأكثر في لعبة أركيد",
+  hidden: true,
+  check: g => g.some(x => x.arcadeMode && [...(x.playthroughs || []), ...(x.scoreAttempts || [])].some(p => (Number(p.score) || 0) >= 1000000))
+}, {
+  id: "arcade_addict",
+  icon: "🔥",
+  title: "إدمان الصالة",
+  desc: "10 تختيمات أركيد فأكثر (إجمالي كل ألعابك)",
+  hidden: true,
+  check: g => g.filter(x => x.arcadeMode).reduce((n, x) => n + (x.playthroughs || []).length, 0) >= 10
+}, {
+  id: "arcade_variety",
+  icon: "🃏",
+  title: "جوّال الصالات",
+  desc: "ختمت 3 ألعاب أركيد مختلفة فأكثر",
+  hidden: true,
+  check: g => g.filter(x => x.arcadeMode && (x.playthroughs || []).length > 0).length >= 3
 }, {
   id: "crt_finisher",
   icon: "📻",
@@ -1459,6 +1495,19 @@ function gameRankOf(games) {
   let idx = 0;
   for (let i = 0; i < GAME_RANKS.length; i++) if (s >= GAME_RANKS[i][0]) idx = i;
   const cur = GAME_RANKS[idx], next = GAME_RANKS[idx + 1] || null;
+  const into = s - cur[0], need = next ? next[0] - cur[0] : 0;
+  return { score: s, name: cur[1], icon: cur[2], tier: idx + 1, next: next ? next[1] : null, nextAt: next ? next[0] : null, pct: next ? Math.min(100, into / need * 100) : 100 };
+}
+// رتبة الأركيد المستقلة — تعتمد على إجمالي تختيمات الأركيد التلقائية عبر كل ألعابك
+const ARCADE_RANKS = [[0, "لاعب أركيد مبتدئ", "🕹️"], [3, "صياد العملات", "🪙"], [8, "قناص النقاط", "🎯"], [15, "سريع الأصابع", "⚡"], [25, "أسطورة الصالة", "🔥"], [40, "ملك الأركيد", "👑"]];
+function arcadeScore(games) {
+  return (games || []).filter(g => g.arcadeMode).reduce((n, g) => n + (g.playthroughs || []).length, 0);
+}
+function arcadeRankOf(games) {
+  const s = arcadeScore(games);
+  let idx = 0;
+  for (let i = 0; i < ARCADE_RANKS.length; i++) if (s >= ARCADE_RANKS[i][0]) idx = i;
+  const cur = ARCADE_RANKS[idx], next = ARCADE_RANKS[idx + 1] || null;
   const into = s - cur[0], need = next ? next[0] - cur[0] : 0;
   return { score: s, name: cur[1], icon: cur[2], tier: idx + 1, next: next ? next[1] : null, nextAt: next ? next[0] : null, pct: next ? Math.min(100, into / need * 100) : 100 };
 }
@@ -4961,6 +5010,8 @@ function AchievementsView({
       if (dayN > 0) metrics.push(["📆", "أيام لعبت فيها", dayN, "يوم"]);
       const platN = games.filter(platinumOf).length;
       if (platN > 0) metrics.push(["💎", "بلاتينيوم شخصي محقق", platN, "بلاتينيوم"]);
+      const arcadeRuns = games.filter(g => g.arcadeMode).reduce((t, g) => t + (g.playthroughs || []).length, 0);
+      if (arcadeRuns > 0) metrics.push(["🕹️", "تختيمات أركيد تلقائية (كل 3 ساعات)", arcadeRuns, "تختيمة"]);
     }
     Object.keys(FAMILIES).forEach(f => {
       const c = done.filter(g => familyOf(g.platform) === f).length;
@@ -7074,7 +7125,7 @@ function App() {
   arcadeList.length > 0 && /*#__PURE__*/React.createElement("section", { className: "sec arcade-sec" },
     /*#__PURE__*/React.createElement("div", { className: "sec-h" },
       /*#__PURE__*/React.createElement("h2", { className: "sec-t" }, "🕹️ ألعاب الأركيد"),
-      /*#__PURE__*/React.createElement("span", { className: "sec-n" }, arcadeList.length, " لعبة")),
+      /*#__PURE__*/React.createElement("span", { className: "sec-n arcade-rank-badge" }, arcadeRankOf(games).icon, " ", arcadeRankOf(games).name)),
     /*#__PURE__*/React.createElement("div", { className: "rail arcade-rail" }, arcadeList.map(g => {
       const best = bestScoreOf(g);
       return /*#__PURE__*/React.createElement("div", {
@@ -8303,6 +8354,7 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .sec-h{ display:flex; align-items:baseline; justify-content:space-between; padding:0 16px 11px; gap:10px; }
 .sec-t{ font-size:17px; font-weight:800; letter-spacing:-.4px; }
 .sec-n{ font-size:12px; color:var(--txt-4); font-weight:700; }
+.arcade-rank-badge{ padding:3px 10px; border-radius:999px; background:linear-gradient(90deg,rgba(255,95,162,.16),rgba(124,92,255,.16) 45%,rgba(34,211,238,.16)); border:1px solid rgba(124,92,255,.35); color:#e3d9ff !important; }
 .rail{ display:flex; gap:11px; overflow-x:auto; padding:2px 16px 6px; scroll-snap-type:x mandatory; scrollbar-width:none; }
 .rail::-webkit-scrollbar{ display:none; }
 .rail > *{ scroll-snap-align:start; flex:none; width:104px; }
