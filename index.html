@@ -2470,6 +2470,10 @@ function GameDetail({
   };
   const pickStatus = k => {
     if (k === "completed") {
+      if (game.arcadeMode) {
+        setMsg("تُحتسب تختيمات الأركيد تلقائيًا كل " + ARCADE_HOURS_PER_RUN + " ساعات لعب — سجّل نتائجك وواصل اللعب");
+        return;
+      }
       openComplete();
       return;
     }
@@ -2500,10 +2504,9 @@ function GameDetail({
     if (add > 0) await onAddPlayTime(game.id, add, selPart, (pend.note || "").trim());
     const pi = selPart;
     if (pi < 0 && game.arcadeMode) {
-      /* ألعاب الأركيد تُعتمَد بنتيجة لا بساعات — الساعة سُجّلت أعلاه كوقت لعب عادي،
-         الآن نفتح نموذج النتيجة بدل الاعتماد المباشر بالساعات */
+      /* ألعاب الأركيد تُحتسَب تلقائيًا (كل 3 ساعات) داخل onAddPlayTime نفسها —
+         الزر اللي يستدعي هذا المسار مخفي أصلًا لهذي الألعاب، هذا احتياط فقط */
       setPend(null);
-      openComplete();
       return;
     }
     const n = await onCompleteTimer(game.id, today, pi);
@@ -2716,15 +2719,18 @@ function GameDetail({
     placeholder: "📓 ملاحظة عن الجلسة (اختياري) — مثل: وصلت للزعيم الثالث",
     value: pend.note || "",
     onChange: e => setPend({ ...pend, note: e.target.value })
-  }), /*#__PURE__*/React.createElement("div", {
+  }), game.arcadeMode && /*#__PURE__*/React.createElement("div", {
+    className: "auto-msg idle", style: { marginBottom: 6 }
+  }, "🕹️ تُحتسب التختيمات تلقائيًا كل " + ARCADE_HOURS_PER_RUN + " ساعات لعب — بس سجّل الوقت"),
+  /*#__PURE__*/React.createElement("div", {
     className: "timer-btns"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, !game.arcadeMode && /*#__PURE__*/React.createElement("button", {
     className: "btn primary",
     onClick: commitAsRun
   }, "🏁 اعتمدها كتختيمة"), /*#__PURE__*/React.createElement("button", {
-    className: "btn ghost",
+    className: game.arcadeMode ? "btn primary" : "btn ghost",
     onClick: confirmSession
-  }, "⏱️ ساعات فقط"), /*#__PURE__*/React.createElement("button", {
+  }, game.arcadeMode ? "✅ تسجيل الوقت" : "⏱️ ساعات فقط"), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
     onClick: () => setPend(null)
   }, "إلغاء"))) : tActive ? /*#__PURE__*/React.createElement("div", {
@@ -3087,7 +3093,7 @@ function GameDetail({
   }, "✅ اعتماد"), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
     onClick: () => setComp(null)
-  }, "إلغاء"))) : pts.length > 0 && /*#__PURE__*/React.createElement("button", {
+  }, "إلغاء"))) : (pts.length > 0 && !game.arcadeMode) && /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
     style: {
       width: "100%"
@@ -5091,6 +5097,28 @@ function migrateGamesList(list) {
   });
   return { games: out, changed: mig };
 }
+/* ---------- تختيم أركيد تلقائي ----------
+   كل 3 ساعات لعب متراكمة = تختيمة جديدة. نتيجة كل تختيمة = أعلى محاولة من
+   scoreAttempts غير المُستهلَكة منذ آخر تختيمة (تُعلَّم used:true عند الاستهلاك
+   حتى تُفرَّق كل تختيمة عن الأخرى بالنتيجة، لا تتكرر نفس النتيجة القديمة). */
+const ARCADE_HOURS_PER_RUN = 3;
+function applyArcadeAutoComplete(g) {
+  if (!g || !g.arcadeMode) return g;
+  const targetCount = Math.floor((Number(g.hours) || 0) / ARCADE_HOURS_PER_RUN);
+  let pts = [...(g.playthroughs || [])];
+  const curCount = pts.length;
+  if (targetCount <= curCount) return g;
+  let attempts = (g.scoreAttempts || []).map(a => ({ ...a }));
+  const today = localDay(new Date());
+  for (let i = curCount; i < targetCount; i++) {
+    const unused = attempts.filter(a => !a.used);
+    const best = unused.reduce((m, a) => Math.max(m, Number(a.score) || 0), 0);
+    attempts = attempts.map(a => a.used ? a : { ...a, used: true });
+    pts.push({ date: today, score: best, hours: 0 });
+  }
+  pts = pts.map((p, i) => ({ ...p, n: i + 1 }));
+  return { ...g, playthroughs: pts, scoreAttempts: attempts, status: "completed", dateCompleted: today, lastPlayed: nowISO() };
+}
 function reconcileGamesTime(list) {
   let changed = false;
   /* ترحيل لمرّة واحدة: تمييز أغلفة المجموعات.
@@ -6128,14 +6156,18 @@ function App() {
   }, []);
   const addPlayTime = useCallback(async (id, hoursToAdd, partIdx, note) => {
     const cur = gamesRef.current;
-    const list = cur.map(g => g.id === id ? {
-      ...g,
-      hours: r1((Number(g.hours) || 0) + hoursToAdd),
-      sessions: [...(g.sessions || []), ...mkSess(null, hoursToAdd, "manual", note)],
-      lastPlayed: nowISO(),
-      parts: partIdx >= 0 && partIdx < 1000 ? (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.parts,
-      goals: partIdx >= 1000 ? (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.goals
-    } : g);
+    const list = cur.map(g => {
+      if (g.id !== id) return g;
+      const ng = {
+        ...g,
+        hours: r1((Number(g.hours) || 0) + hoursToAdd),
+        sessions: [...(g.sessions || []), ...mkSess(null, hoursToAdd, "manual", note)],
+        lastPlayed: nowISO(),
+        parts: partIdx >= 0 && partIdx < 1000 ? (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.parts,
+        goals: partIdx >= 1000 ? (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.goals
+      };
+      return partIdx < 0 ? applyArcadeAutoComplete(ng) : ng;
+    });
     setGames(list);
     gamesRef.current = list;
     await sset(KEY_GAMES, list);
@@ -6528,7 +6560,8 @@ function App() {
       cover: null
     });
   };
-  const handleSave = async (game, cover) => {
+  const handleSave = async (game0, cover) => {
+    const game = applyArcadeAutoComplete(game0);
     const cur = gamesRef.current;
     const exists = cur.some(g => g.id === game.id);
     const list = exists ? cur.map(g => g.id === game.id ? game : g) : [game, ...cur];
