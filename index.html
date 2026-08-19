@@ -6858,7 +6858,9 @@ function App() {
   const ach = useMemo(() => computeAchievements(realGames(games)), [games]);
   const xp = useMemo(() => totalXp(games), [games]);
   const lvl = useMemo(() => levelInfo(xp), [xp]);
-  const lastPlayedList = useMemo(() => games.filter(g => g.lastPlayed).sort((a, b) => String(b.lastPlayed).localeCompare(String(a.lastPlayed))).slice(0, 4), [games]);
+  const lastPlayedList = useMemo(() => games.filter(g => g.lastPlayed && !g.arcadeMode).sort((a, b) => String(b.lastPlayed).localeCompare(String(a.lastPlayed))).slice(0, 4), [games]);
+  const bestScoreOf = g => Math.max(0, ...(g.playthroughs || []).map(p => Number(p.score) || 0), ...(g.scoreAttempts || []).map(a => Number(a.score) || 0));
+  const arcadeList = useMemo(() => games.filter(g => g.arcadeMode && !g.shell).sort((a, b) => String(b.lastPlayed || b.dateAdded || "").localeCompare(String(a.lastPlayed || a.dateAdded || ""))), [games]);
   const lastG = lastPlayedList[0] || null;
   const __ambient = useCoverColor(lastG ? covers[lastG.id] : null, theme.mode);
   const streak = useMemo(() => curStreak(games), [games]);
@@ -7069,6 +7071,22 @@ function App() {
       /*#__PURE__*/React.createElement("button", { className: "rtile-t", title: "بدء العدّاد", onClick: e => { e.stopPropagation(); startTimer(g); openGame(g); } }, "⏱️")),
       /*#__PURE__*/React.createElement("span", { className: "rtile-n" }, g.name),
       /*#__PURE__*/React.createElement("span", { className: "rtile-s" }, fmtHours(g.hours || 0)))))),
+  arcadeList.length > 0 && /*#__PURE__*/React.createElement("section", { className: "sec arcade-sec" },
+    /*#__PURE__*/React.createElement("div", { className: "sec-h" },
+      /*#__PURE__*/React.createElement("h2", { className: "sec-t" }, "🕹️ ألعاب الأركيد"),
+      /*#__PURE__*/React.createElement("span", { className: "sec-n" }, arcadeList.length, " لعبة")),
+    /*#__PURE__*/React.createElement("div", { className: "rail arcade-rail" }, arcadeList.map(g => {
+      const best = bestScoreOf(g);
+      return /*#__PURE__*/React.createElement("div", {
+        key: g.id, className: "rtile rtile-arcade", onClick: () => openGame(g)
+      }, /*#__PURE__*/React.createElement("div", { className: "rtile-cv" },
+        covers[g.id] ? /*#__PURE__*/React.createElement("img", { src: covers[g.id], alt: "", loading: "lazy" }) : /*#__PURE__*/React.createElement("span", { className: "rtile-noart" }, "🕹️"),
+        timer && timer.gameId === g.id
+          ? /*#__PURE__*/React.createElement("span", { className: "rtile-t rtile-live" }, "⏱️")
+          : /*#__PURE__*/React.createElement("button", { className: "rtile-t", title: "بدء العدّاد", onClick: e => { e.stopPropagation(); startTimer(g); openGame(g); } }, "⏱️")),
+        /*#__PURE__*/React.createElement("span", { className: "rtile-n" }, g.name),
+        /*#__PURE__*/React.createElement("span", { className: "rtile-s" }, best > 0 ? "🎯 " + best.toLocaleString() : "— بلا نتيجة", " · ⏱ ", fmtHours(g.hours || 0)));
+    }))),
   (() => {
     const q = games.filter(g => Number(g.queuePos) > 0).sort((a, b) => a.queuePos - b.queuePos);
     if (!q.length) return null;
@@ -7498,6 +7516,12 @@ const CSS = `
 .rtile-t { position:absolute; bottom:4px; left:4px; width:26px; height:26px; border-radius:9px; border:1px solid color-mix(in srgb,var(--gold) 53%,transparent); background:color-mix(in srgb, #0a0c16cc var(--bm), var(--bb)); color:var(--gold-2); font-size:13px; line-height:1; cursor:pointer; backdrop-filter:blur(6px); }
 .rtile-n { font-size:10.5px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rtile-s { font-size:9.5px; color:var(--txt-3); }
+.arcade-sec .sec-t { background:linear-gradient(90deg,#ff5fa2,#7c5cff 45%,#22d3ee); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.arcade-rail .rtile-cv { border:1.5px solid transparent; background-image:linear-gradient(var(--well),var(--well)),linear-gradient(135deg,#ff5fa2,#7c5cff,#22d3ee); background-origin:border-box; background-clip:padding-box, border-box; box-shadow:0 0 0 1px rgba(124,92,255,.18), var(--sh1); }
+.rtile-arcade:active .rtile-cv { box-shadow:0 0 14px 2px rgba(124,92,255,.55); }
+.rtile-arcade .rtile-s { font-weight:700; color:#c9b8ff; }
+.rtile-live { position:absolute; bottom:4px; left:4px; width:26px; height:26px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:color-mix(in srgb, #0a0c16cc var(--bm), var(--bb)); color:#4ade80; font-size:13px; animation:arcpulse 1.1s ease-in-out infinite; }
+@keyframes arcpulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
 
 /* ---------- الرفوف ---------- */
 .shelves { display:flex; flex-direction:column; gap:20px; }
