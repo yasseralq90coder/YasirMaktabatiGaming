@@ -1812,6 +1812,38 @@ async function raGameProgress(gameId, user, key) {
   };
 }
 const RA_IMPORT_NOTE = "مستوردة من RetroAchievements";
+/* RA يفهرس نُسخًا فرعية لنفس اللعبة: "[Subset - Bonus]" و"~Hack~" و"~Homebrew~"…
+   بدون تجريدها تُستورَد كل نسخة كلعبة مستقلة فتظهر مكرّرة في المكتبة. */
+function raBaseTitle(t) {
+  return String(t || "")
+    .replace(/\[[^\]]*\]/g, " ")   // [Subset - Bonus] وما شابه
+    .replace(/~[^~]*~/g, " ")      // ~Hack~ ~Homebrew~ ~Prototype~
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+const raDedupKey = (title, platform) => lrNorm(raBaseTitle(title)) + "|" + platform;
+/* يبني جلسات مؤرَّخة حقيقية من تواريخ الإنجازات بدل جلسة واحدة بتاريخ اليوم:
+   كل يوم حصلت فيه على إنجاز = جلسة، ووقت اللعب يُوزَّع بينها بوزن عدد إنجازات كل يوم. */
+function raSessionsFromAchievements(achievements, totalHours) {
+  const byDay = {};
+  for (const a of achievements || []) {
+    if (!a || !a.earned || !a.date) continue;
+    const d = String(a.date).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    byDay[d] = (byDay[d] || 0) + 1;
+  }
+  const days = Object.keys(byDay).sort();
+  if (!days.length) return { sessions: [], first: "", last: "" };
+  const totalW = days.reduce((s, d) => s + byDay[d], 0);
+  const totalMs = Math.round(Math.max(0, Number(totalHours) || 0) * 3600000);
+  const sessions = days.map(d => ({
+    at: new Date(d + "T18:00:00").toISOString(),
+    ms: Math.max(60000, Math.round(totalMs * (byDay[d] / totalW))),
+    src: "backfill",
+    note: RA_IMPORT_NOTE
+  }));
+  return { sessions, first: days[0], last: days[days.length - 1] };
+}
 const raGameUrl = id => "https://retroachievements.org/game/" + id;
 const raAchUrl = id => "https://retroachievements.org/achievement/" + id;
 
@@ -4799,6 +4831,9 @@ function AchievementsView({
   const [tab, setTab] = useState("overview");
   const [rSort, setRSort] = useState("date");
   const [ragOpen, setRagOpen] = useState("");
+  const [ragPlat, setRagPlat] = useState("all");
+  const [ragDev, setRagDev] = useState("all");
+  const [ragSort, setRagSort] = useState("earned");
   const runs = useMemo(() => {
     const a = playAchievements(games);
     if (rSort === "date") a.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));else if (rSort === "hours") a.sort((x, y) => (Number(y.hours) || 0) - (Number(x.hours) || 0));else if (rSort === "console") a.sort((x, y) => String(x.platform).localeCompare(String(y.platform)));else if (rSort === "kind") a.sort((x, y) => (y.kind === "master") - (x.kind === "master"));else if (rSort === "diff") a.sort((x, y) => String(y.diff).localeCompare(String(x.diff)));else a.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
@@ -5312,13 +5347,26 @@ function AchievementsView({
       /*#__PURE__*/React.createElement("b", null, b.hidden && !b.done ? "وسام خفي" : b.title),
       /*#__PURE__*/React.createElement("span", { className: "bw-d" }, b.hidden && !b.done ? "افتحه لتكتشفه…" : b.desc))))),
   tab === "racheevos" && (() => {
-    const raGamesList = games.filter(g => g.hardware === "emulator" && g.ra && (g.ra.achievements || []).length)
+    const raAll = games.filter(g => g.hardware === "emulator" && g.ra && (g.ra.achievements || []).length);
+    const raPlats = [...new Set(raAll.map(g => g.platform))].sort();
+    const raDevs = [...new Set(raAll.map(g => g.emuDevice || "pc"))];
+    const raGamesList = raAll
+      .filter(g => ragPlat === "all" || g.platform === ragPlat)
+      .filter(g => ragDev === "all" || (g.emuDevice || "pc") === ragDev)
       .map(g => {
         const list = g.ra.achievements || [];
         const earned = list.filter(a => a.earned);
         return { g, list, earned, pts: earned.reduce((s, a) => s + (Number(a.points) || 0), 0) };
       })
-      .sort((a, b) => b.earned.length - a.earned.length || b.pts - a.pts);
+      .sort((a, b) => {
+        if (ragSort === "pct") {
+          const pa = a.list.length ? a.earned.length / a.list.length : 0, pb = b.list.length ? b.earned.length / b.list.length : 0;
+          return pb - pa;
+        }
+        if (ragSort === "name") return a.g.name.localeCompare(b.g.name);
+        if (ragSort === "hours") return (Number(b.g.hours) || 0) - (Number(a.g.hours) || 0);
+        return b.earned.length - a.earned.length || b.pts - a.pts;
+      });
     const totEarned = raGamesList.reduce((s, x) => s + x.earned.length, 0);
     const totAll = raGamesList.reduce((s, x) => s + (Number(x.g.ra.numAchievements) || x.list.length), 0);
     const totPts = raGamesList.reduce((s, x) => s + x.pts, 0);
@@ -5333,11 +5381,27 @@ function AchievementsView({
             /*#__PURE__*/React.createElement("b", { style: { color: col } }, v),
             /*#__PURE__*/React.createElement("span", null, l)))),
       /*#__PURE__*/React.createElement("div", { className: "section-title" }, "🏅 إنجازاتك حسب اللعبة"),
+      /*#__PURE__*/React.createElement("div", { className: "rag-filters" },
+        /*#__PURE__*/React.createElement("div", { className: "filters" },
+          /*#__PURE__*/React.createElement(FilterChip, { active: ragPlat === "all", onClick: () => setRagPlat("all") }, "كل الأجهزة"),
+          raPlats.map(p2 => /*#__PURE__*/React.createElement(FilterChip, {
+            key: p2, active: ragPlat === p2, onClick: () => setRagPlat(p2), color: colorOf(p2)
+          }, (FAM_ICON[familyOf(p2)] || "📦") + " " + p2))),
+        raDevs.length > 1 && /*#__PURE__*/React.createElement("div", { className: "filters" },
+          /*#__PURE__*/React.createElement(FilterChip, { active: ragDev === "all", onClick: () => setRagDev("all") }, "كل أنواع المحاكاة"),
+          raDevs.map(d => /*#__PURE__*/React.createElement(FilterChip, {
+            key: d, active: ragDev === d, onClick: () => setRagDev(d)
+          }, (EMU_DEVICES[d] ? EMU_DEVICES[d].icon + " " + EMU_DEVICES[d].label : d)))),
+        /*#__PURE__*/React.createElement("div", { className: "filters" },
+          /*#__PURE__*/React.createElement("span", { className: "sort-label" }, "↕️ ترتيب:"),
+          [["earned", "الأكثر إنجازًا"], ["pct", "نسبة الإكمال"], ["hours", "ساعات اللعب"], ["name", "الاسم"]].map(([k2, l2]) =>
+            /*#__PURE__*/React.createElement(FilterChip, { key: k2, active: ragSort === k2, onClick: () => setRagSort(k2) }, l2)))),
+      raGamesList.length === 0 && /*#__PURE__*/React.createElement("div", { className: "rag-empty" }, "لا نتائج بهذا الفلتر"),
       /*#__PURE__*/React.createElement("div", { className: "track-list" }, raGamesList.map(({ g, list, earned, pts }) => {
         const tot = Number(g.ra.numAchievements) || list.length;
         const pct = tot ? Math.round(earned.length / tot * 100) : 0;
         const open = ragOpen === g.id;
-        return /*#__PURE__*/React.createElement("div", { key: g.id, className: "track" },
+        return /*#__PURE__*/React.createElement("div", { key: g.id, className: "ragame" },
           /*#__PURE__*/React.createElement("div", { className: "rag-head", onClick: () => setRagOpen(open ? "" : g.id) },
             covers[g.id]
               ? /*#__PURE__*/React.createElement("img", { src: covers[g.id], alt: "", loading: "lazy" })
@@ -6745,31 +6809,68 @@ function App() {
       if (!prog) { skipped++; continue; }
       if (prog.playtimeSec < RA_MIN_SECONDS) { skipped++; continue; }
       const cur = gamesRef.current;
+      const plat = raPlatformOf(prog.consoleName);
+      const raHours = r1(prog.playtimeSec / 3600);
+      /* المطابقة: بمعرّف RA أولًا، ثم بالاسم المجرَّد من وسوم النُسخ الفرعية + نفس المنصّة،
+         حتى لا تُستورَد "[Subset]" و"~Hack~" كألعاب مكرّرة. */
+      const key = raDedupKey(prog.title, plat);
       const existing = cur.find(g => String(g.raGameId) === String(gid))
-        || cur.find(g => g.hardware === "emulator" && lrNorm(g.name) === lrNorm(prog.title));
-      const raBlob = {
-        gameId: gid, numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
-        numAwardedHardcore: prog.numAwardedHardcore, completion: prog.completion,
-        guideUrl: prog.guideUrl, achievements: prog.achievements, syncedAt: prog.syncedAt,
-        playtimeSec: prog.playtimeSec
-      };
+        || cur.find(g => g.hardware === "emulator" && raDedupKey(g.name, g.platform) === key);
+      const sameGame = existing && String(existing.raGameId) === String(gid);
+      const dated = raSessionsFromAchievements(prog.achievements, raHours);
+      const lastISO = dated.last ? new Date(dated.last + "T18:00:00").toISOString() : nowISO();
       if (existing) {
-        // مزامنة فقط: نحدّث الإنجازات ولا نلمس ساعات المستخدم إن كانت أكبر (بياناته أدق)
-        const keepHours = Math.max(Number(existing.hours) || 0, r1(prog.playtimeSec / 3600));
-        const next = gamesRef.current.map(g => g.id === existing.id ? { ...g, raGameId: gid, ra: raBlob, hours: keepHours } : g);
+        const prevRa = existing.ra || {};
+        /* نفس اللعبة → استبدال كامل. نسخة فرعية → دمج الإنجازات باتحاد المعرّفات. */
+        const mergedAch = sameGame ? prog.achievements : (() => {
+          const m = new Map();
+          for (const a of prevRa.achievements || []) m.set(a.id, a);
+          for (const a of prog.achievements) m.set(a.id, a);
+          return [...m.values()];
+        })();
+        const raBlob = {
+          gameId: sameGame ? gid : (prevRa.gameId || gid),
+          numAchievements: sameGame ? prog.numAchievements : mergedAch.length,
+          numAwarded: sameGame ? prog.numAwarded : mergedAch.filter(a => a.earned).length,
+          numAwardedHardcore: sameGame ? prog.numAwardedHardcore : mergedAch.filter(a => a.hardcore).length,
+          completion: prog.completion, guideUrl: prog.guideUrl || prevRa.guideUrl || "",
+          achievements: mergedAch, syncedAt: prog.syncedAt,
+          playtimeSec: sameGame ? prog.playtimeSec : (Number(prevRa.playtimeSec) || 0) + prog.playtimeSec
+        };
+        const totalHours = sameGame ? raHours : r1((Number(prevRa.playtimeSec) || 0) / 3600 + raHours);
+        // لا نُنقص ساعات سجّلها المستخدم يدويًا
+        const keepHours = Math.max(Number(existing.hours) || 0, totalHours);
+        // نستبدل جلسات الاستيراد فقط ونُبقي جلسات المستخدم كما هي
+        const mine = (existing.sessions || []).filter(s => !(s && s.note === RA_IMPORT_NOTE));
+        const reSess = raSessionsFromAchievements(raBlob.achievements, totalHours);
+        const olderAdd = dated.first && dated.first < (existing.dateAdded || "9999")
+          ? dated.first : (existing.dateAdded || dated.first || localDay(new Date()));
+        const newerPlay = String(existing.lastPlayed || "") > lastISO ? existing.lastPlayed : lastISO;
+        const next = gamesRef.current.map(g => g.id === existing.id ? {
+          ...g, raGameId: raBlob.gameId, ra: raBlob, hours: keepHours,
+          sessions: [...mine, ...reSess.sessions],
+          dateAdded: olderAdd, lastPlayed: newerPlay
+        } : g);
         setGames(next); gamesRef.current = next;
         try { await sset(KEY_GAMES, next); } catch {}
         setDetail(p => p && p.game.id === existing.id ? { ...p, game: next.find(x => x.id === existing.id) } : p);
         updated++;
       } else {
-        const plat = raPlatformOf(prog.consoleName);
+        const raBlob = {
+          gameId: gid, numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
+          numAwardedHardcore: prog.numAwardedHardcore, completion: prog.completion,
+          guideUrl: prog.guideUrl, achievements: prog.achievements, syncedAt: prog.syncedAt,
+          playtimeSec: prog.playtimeSec
+        };
         const ng = {
-          ...blankGame(), id: makeId(), name: prog.title, platform: plat,
+          ...blankGame(), id: makeId(), name: raBaseTitle(prog.title) || prog.title, platform: plat,
           hardware: "emulator", emuDevice: "pc", type: "downloaded",
           status: prog.numAwarded > 0 && prog.numAwarded >= prog.numAchievements && prog.numAchievements > 0 ? "completed" : "playing",
-          hours: r1(prog.playtimeSec / 3600),
-          sessions: mkSess(null, r1(prog.playtimeSec / 3600), "backfill", RA_IMPORT_NOTE),
-          lastPlayed: nowISO(), dateAdded: localDay(new Date()),
+          hours: raHours,
+          // جلسات مؤرَّخة بتواريخ لعبك الحقيقية، لا جلسة واحدة بتاريخ اليوم
+          sessions: dated.sessions.length ? dated.sessions : mkSess(null, raHours, "backfill", RA_IMPORT_NOTE),
+          lastPlayed: lastISO,
+          dateAdded: dated.first || localDay(new Date()),
           raGameId: gid, ra: raBlob
         };
         const next = [ng, ...gamesRef.current];
@@ -8877,6 +8978,8 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .ra-pts{ flex:none; font-family:var(--num); font-size:12px; font-weight:800; color:#f5b942; }
 .ra-sync{ font-size:10px; color:var(--txt-4); text-align:center; margin-top:6px; }
 /* ---- تبويب إنجازات RA في الإحصائيات ---- */
+.ragame{ display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:var(--r3); border:1px solid var(--line); background:linear-gradient(180deg,var(--s1),var(--card-2)); box-shadow:var(--sh1); }
+.rag-filters{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
 .rag-head{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); cursor:pointer; }
 .rag-head img{ width:34px; height:34px; border-radius:8px; flex:none; object-fit:cover; }
 .rag-head .rag-t{ flex:1; min-width:0; }
