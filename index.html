@@ -1675,6 +1675,65 @@ const RA_ALIASES = {
   "Atari 2600": ["atari2600"],
   "3DO": ["3do"]
 };
+/* ══════════ مطابقة المنصّة مع نتائج RAWG ══════════
+   RAWG لا يعرف أسماء منصّاتنا العربية/المختصرة، وبحثه بلا فلتر يرجع أحيانًا نسخة
+   منصّة أخرى (نسخة PS1 للعبة على دريم كاست) فتُجلب سنة ومطوّر وغلاف خاطئين.
+   نطابق أسماء منصّات RAWG الواردة في النتيجة نفسها — بلا حاجة لجدول معرّفات رقمية. */
+const PLAT_ALIASES = {
+  /* القيم هنا أسماء منصّات RAWG كما ترد حرفيًا في نتائجه.
+     المطابقة تامّة فقط — بلا احتواء جزئي، لأن "playstation" جزء من "playstation 2"
+     و"xbox" جزء من "xbox 360"، فالاحتواء كان يخلط الأجيال ببعضها. */
+  "Nintendo Switch 2": ["nintendo switch 2"],
+  "Nintendo Switch": ["nintendo switch"],
+  "Wii U": ["wii u"],
+  "Wii": ["wii"],
+  "Nintendo GameCube": ["gamecube", "nintendo gamecube"],
+  "Nintendo 64": ["nintendo 64"],
+  "SNES": ["snes", "super nintendo entertainment system", "super famicom"],
+  "NES": ["nes", "nintendo entertainment system", "famicom"],
+  "Nintendo 3DS": ["nintendo 3ds", "3ds"],
+  "Nintendo DS": ["nintendo ds", "nintendo dsi"],
+  "Game Boy Advance": ["game boy advance"],
+  "Game Boy / Color": ["game boy", "game boy color"],
+  "PlayStation 5": ["playstation 5"],
+  "PlayStation 4": ["playstation 4"],
+  "PlayStation 3": ["playstation 3"],
+  "PlayStation 2": ["playstation 2"],
+  "PlayStation": ["playstation", "psone", "ps1"],
+  "PS Vita": ["ps vita", "playstation vita"],
+  "PSP": ["psp", "playstation portable"],
+  "Xbox Series X|S": ["xbox series s x", "xbox series x s", "xbox series x", "xbox series s"],
+  "Xbox One": ["xbox one"],
+  "Xbox 360": ["xbox 360"],
+  "Xbox (الأصلي)": ["xbox"],
+  "Sega Dreamcast": ["dreamcast"],
+  "Sega Saturn": ["sega saturn", "saturn"],
+  "Sega Genesis": ["genesis", "sega mega drive genesis", "mega drive", "megadrive"],
+  "Sega Master System": ["sega master system", "master system"],
+  "Sega Game Gear": ["game gear"],
+  "Atari 2600": ["atari 2600"],
+  "PC — Steam": ["pc", "windows", "macos", "linux"],
+  "PC — GOG": ["pc", "windows", "macos", "linux"],
+  "PC — Epic": ["pc", "windows", "macos", "linux"],
+  "PC — Xbox / Game Pass": ["pc", "windows"],
+  "PC — أخرى": ["pc", "windows", "macos", "linux"],
+  "Arcade": ["arcade"],
+  "Neo Geo": ["neo geo", "neogeo"],
+  "TurboGrafx-16": ["turbografx 16", "pc engine", "turbografx"],
+  "3DO": ["3do"]
+};
+const platNorm = s2 => lrNorm(s2).replace(/\s+/g, "");
+/* مطابقة تامّة فقط — راجع التعليق أعلاه لسبب رفض الاحتواء الجزئي */
+function rawgPlatMatches(ourPlatform, rawgNames) {
+  const aliases = PLAT_ALIASES[ourPlatform];
+  if (!aliases || !rawgNames || !rawgNames.length) return false;
+  const wanted = new Set([ourPlatform, ...aliases].map(platNorm).filter(Boolean));
+  for (const h of rawgNames) if (wanted.has(platNorm(h))) return true;
+  return false;
+}
+const rawgNamesOf = r => ((r && r.platforms) || [])
+  .map(p => (p && p.platform && (p.platform.name || p.platform.slug)) || "")
+  .filter(Boolean);
 async function raFetch(path, user, key) {
   const sep = path.includes("?") ? "&" : "?";
   const r = await fetch(RA_BASE + path + sep + "z=" + encodeURIComponent(user) + "&y=" + encodeURIComponent(key));
@@ -2143,6 +2202,16 @@ function useCoverColor(cover, mode) {
   React.useEffect(() => { let ok = true; setC(null); coverColor(cover, v => { if (ok) setC(v); }, mode); return () => { ok = false; }; }, [cover, mode]);
   return c;
 }
+/* ViewTransition يرفض وعوده (ready تحديدًا) عند مقاطعة انتقال بآخر — بلا معالج
+   يتحوّل لـUnhandledRejection يلوّث الكونسول. نبتلعه صراحةً: الانتقال تجميلي بحت. */
+function vtQuiet(t) {
+  if (!t) return t;
+  const nop = () => {};
+  try { t.ready && t.ready.then && t.ready.then(nop, nop); } catch (e) {}
+  try { t.finished && t.finished.then && t.finished.then(nop, nop); } catch (e) {}
+  try { t.updateCallbackDone && t.updateCallbackDone.then && t.updateCallbackDone.then(nop, nop); } catch (e) {}
+  return t;
+}
 /* ===== الانتقال المشترك: الغلاف يتمدّد ===== */
 function vtOpen(id, fn) {
   let el = null;
@@ -2151,7 +2220,7 @@ function vtOpen(id, fn) {
   el.classList.add("vt-src");
   const clean = () => { try { el.classList.remove("vt-src"); } catch (e) {} };
   try {
-    const t = document.startViewTransition(() => { ReactDOM.flushSync(fn); clean(); });
+    const t = vtQuiet(document.startViewTransition(() => { ReactDOM.flushSync(fn); clean(); }));
     t.finished.then(clean, clean);
   } catch (e) { clean(); fn(); }
 }
@@ -2483,12 +2552,16 @@ async function pickGame(lang, name) {
   }
   return null;
 }
-async function rawgFetch(name, key) {
+async function rawgFetch(name, key, platform, opts) {
   const norm = x => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const sj = await (await fetch("https://api.rawg.io/api/games?key=" + key + "&search=" + encodeURIComponent(name) + "&page_size=5")).json();
+  const sj = await (await fetch("https://api.rawg.io/api/games?key=" + key + "&search=" + encodeURIComponent(name) + "&page_size=12")).json();
   const results = sj.results || [];
   if (!results.length) return null;
-  const g = results.find(r => norm(r.name) === norm(name)) || results.find(r => relates(name, r.name)) || null;
+  /* الأولوية للنتائج التي تصدر فعلًا على منصّة اللعبة عندك — وإلا نأخذ أفضل تطابق اسم.
+     هذا يمنع جلب بيانات نسخة PS1 للعبة على دريم كاست. */
+  const onPlat = platform ? results.filter(r => rawgPlatMatches(platform, rawgNamesOf(r))) : [];
+  const pick = pool => pool.find(r => norm(r.name) === norm(name)) || pool.find(r => relates(name, r.name)) || null;
+  const g = pick(onPlat) || (onPlat.length ? onPlat[0] : null) || pick(results);
   if (!g) return null;
   const d = await (await fetch("https://api.rawg.io/api/games/" + g.id + "?key=" + key)).json();
   const genre = migrateGenre((d.genres || []).slice(0, 2).map(x => x.name).join(", "));
@@ -2498,11 +2571,13 @@ async function rawgFetch(name, key) {
   const playtime = Number(d.playtime) || 0;
   const coverUrl = d.background_image || g.background_image || "";
   let trailerMp4 = "";
-  try {
-    const mv = await (await fetch("https://api.rawg.io/api/games/" + g.id + "/movies?key=" + key)).json();
-    const m = (mv.results || [])[0];
-    trailerMp4 = m && m.data && (m.data.max || m.data["480"]) || "";
-  } catch {}
+  if (!(opts && opts.skipTrailer)) {
+    try {
+      const mv = await (await fetch("https://api.rawg.io/api/games/" + g.id + "/movies?key=" + key)).json();
+      const m = (mv.results || [])[0];
+      trailerMp4 = m && m.data && (m.data.max || m.data["480"]) || "";
+    } catch {}
+  }
   return {
     genre: genre,
     developer: developer,
@@ -2523,20 +2598,19 @@ async function rawgTrailer(name, key) {
   const m = (mv.results || [])[0];
   return m && m.data && (m.data.max || m.data["480"]) || "";
 }
-async function fetchGameEnrichment(name, rawgKey, platform) {
-  let base = null;
-  if (rawgKey) {
-    try {
-      base = await rawgFetch(name, rawgKey);
-    } catch (e) {}
-  }
-  let wiki = null;
-  for (const lang of ["ar", "en"]) {
-    try {
-      wiki = await pickGame(lang, name);
-      if (wiki) break;
-    } catch (e) {}
-  }
+async function fetchGameEnrichment(name, rawgKey, platform, opts) {
+  /* RAWG وويكيبيديا مستقلّان — ننفّذهما بالتوازي بدل التتابع (يقلّص الزمن للنصف تقريبًا).
+     ولنفس السبب نُمرّر platform لـRAWG حتى تُطابَق نسخة المنصّة الصحيحة. */
+  const wikiChain = (async () => {
+    for (const lang of ["ar", "en"]) {
+      try { const w = await pickGame(lang, name); if (w) return w; } catch (e) {}
+    }
+    return null;
+  })();
+  const rawgChain = rawgKey
+    ? rawgFetch(name, rawgKey, platform, opts).catch(() => null)
+    : Promise.resolve(null);
+  const [base, wiki] = await Promise.all([rawgChain, wikiChain]);
   if (!base && !wiki) throw new Error("not-found");
   const out = {};
   const desc = wiki && wiki.desc || base && base.desc || "";
@@ -6330,7 +6404,7 @@ function BackupView({
     /*#__PURE__*/React.createElement("div", { className: "bk-title" }, "🎮 استيراد ألعابي من RetroAchievements"),
     /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
       "يجلب ألعاب حسابك مع أوقات اللعب الحقيقية وإنجازاتك، ويضيف ",
-      /*#__PURE__*/React.createElement("b", null, "فقط الألعاب التي لعبتها ساعتين فأكثر"),
+      /*#__PURE__*/React.createElement("b", null, "فقط الألعاب التي لعبتها ٣٠ دقيقة فأكثر"),
       " كألعاب محاكي. الألعاب الموجودة عندك تُحدَّث إنجازاتها بلا تكرار، ولا تُنقص ساعاتك المسجّلة يدويًا. أعد التشغيل وقتما شئت للمزامنة."),
     /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
       /*#__PURE__*/React.createElement("button", {
@@ -6345,29 +6419,37 @@ function BackupView({
       /*#__PURE__*/React.createElement("div", { className: "bk-progress-fill", style: { width: Math.round(raImp.i / Math.max(1, raImp.total) * 100) + "%" } })),
     raImp.state === "done" && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" },
       "تمت المزامنة ✓ — أُضيفت ", /*#__PURE__*/React.createElement("b", null, raImp.added), " لعبة، حُدِّثت ",
-      /*#__PURE__*/React.createElement("b", null, raImp.updated), "، وتُخطّيت ", /*#__PURE__*/React.createElement("b", null, raImp.skipped), " (أقل من ساعتين)"),
+      /*#__PURE__*/React.createElement("b", null, raImp.updated), "، وتُخطّيت ", /*#__PURE__*/React.createElement("b", null, raImp.skipped), " (أقل من ٣٠ دقيقة)"),
     raImp.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raImp.err || "تعذّرت المزامنة"),
     raJunkCount > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 10 } },
       /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
         "⚠️ عندك ", /*#__PURE__*/React.createElement("b", null, raJunkCount),
-        " لعبة دخلت باستيراد قديم معطوب (كانت العتبة تُقارَن بالدقائق والقيمة بالثواني، فدخل كل ما تجاوز دقيقتين). أوقاتها صُحِّحت الآن، وتقدر تحذفها إن ما تبيها."),
+        " لعبة أقل من ٣٠ دقيقة لعب. أوقاتها صحيحة الآن، وتقدر تحذفها إن ما تبيها."),
       /*#__PURE__*/React.createElement("button", {
         className: "btn ghost danger", style: { width: "100%", marginTop: 6 },
-        onClick: () => { if (window.confirm("حذف " + raJunkCount + " لعبة مستوردة بأقل من ساعتين؟ لن تُحذف أي لعبة سجّلت فيها تختيمة.")) onRaCleanup(); }
-      }, "🧹 حذف الألعاب المستوردة بأقل من ساعتين (" + raJunkCount + ")"))),
+        onClick: () => { if (window.confirm("حذف " + raJunkCount + " لعبة مستوردة بأقل من ٣٠ دقيقة؟ لن تُحذف أي لعبة سجّلت فيها تختيمة.")) onRaCleanup(); }
+      }, "🧹 حذف الألعاب المستوردة بأقل من ٣٠ دقيقة (" + raJunkCount + ")"))),
   /*#__PURE__*/React.createElement("div", {
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
   }, "🔄 تحديث ألعاب المكتبة وأغلفتها"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
-  }, "يملأ التصنيف والسنة والمطوّر والوصف لكل لعبة ناقصة، ويجلب غلافًا مطابقًا لجهاز اللعبة نفسه — غلاف علبة Dreamcast للعبة على Dreamcast لا PS1 مثلًا (عبر قاعدة Libretro للأنظمة الكلاسيكية، أو RAWG/ويكيبيديا للحديثة). لا يغيّر الألعاب المكتملة البيانات أصلًا."), /*#__PURE__*/React.createElement("div", {
+  }, "يجلب التصنيف والسنة والمطوّر والوصف والغلاف — ", /*#__PURE__*/React.createElement("b", null, "مطابقًا لجهاز اللعبة نفسه"),
+    ": لعبة على Dreamcast تأخذ بيانات وغلاف نسخة Dreamcast لا نسخة PS1 (غلاف علبة حقيقي من Libretro للأنظمة الكلاسيكية، وRAWG مفلتَرًا بالمنصّة للبقية). يعمل على ٦ ألعاب بالتوازي فهو أسرع بكثير من السابق."),
+  /*#__PURE__*/React.createElement("div", {
     className: "bk-actions"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn auto",
-    onClick: onBulkEnrich,
+    onClick: () => onBulkEnrich(false),
     disabled: bulk.state === "running"
-  }, bulk.state === "running" ? "⏳ " + bulk.i + " / " + bulk.total : "🔄 تحديث الألعاب الناقصة وأغلفتها")), bulk.state === "running" && /*#__PURE__*/React.createElement("div", {
+  }, bulk.state === "running" ? "⏳ " + bulk.i + " / " + bulk.total : "🔄 إكمال الناقص فقط"),
+  /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    style: { marginTop: 6, width: "100%" },
+    onClick: () => { if (window.confirm("تحديث شامل لكل ألعابك (" + games.length + ") — يعيد جلب البيانات ويستبدل الأغلفة بأغلفة مطابقة للمنصّة. متابعة؟")) onBulkEnrich(true); },
+    disabled: bulk.state === "running"
+  }, "♻️ تحديث شامل: كل الألعاب وأغلفتها (" + games.length + ")")), bulk.state === "running" && /*#__PURE__*/React.createElement("div", {
     className: "bk-progress"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-progress-fill",
@@ -6523,7 +6605,7 @@ function App() {
     if (VIEWS[n]) { if (navigator.vibrate) navigator.vibrate(8); go(VIEWS[n]); }
   };
   const go = v => { if (v === view) return;
-    if (document.startViewTransition) document.startViewTransition(() => ReactDOM.flushSync(() => setView(v)));
+    if (document.startViewTransition) vtQuiet(document.startViewTransition(() => ReactDOM.flushSync(() => setView(v))));
     else setView(v); };
   const [editing, setEditing] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -6771,8 +6853,8 @@ function App() {
   }, []);
   /* ---------- استيراد/مزامنة RetroAchievements ----------
      يجلب ألعاب حسابك، يقرأ وقت اللعب لكل واحدة، ويستورد فقط ما تجاوز
-     ساعتين كألعاب محاكي. الإنجازات تُخزَّن داخل اللعبة (g.ra). */
-  const RA_MIN_SECONDS = 2 * 3600; // ساعتان
+     ٣٠ دقيقة كألعاب محاكي. الإنجازات تُخزَّن داخل اللعبة (g.ra). */
+  const RA_MIN_SECONDS = 30 * 60; // ٣٠ دقيقة
   const [raImp, setRaImp] = useState({ state: "idle", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" });
   /* الألعاب التي دخلت خطأً بالعتبة المعطوبة (كانت تُقارَن بالدقائق والقيمة ثوانٍ):
      نستهدف فقط ما أنشأه الاستيراد نفسه (له جلسة الاستيراد) ولم تلمسه أنت بتختيمة. */
@@ -6884,31 +6966,47 @@ function App() {
     setRaImp({ state: "done", i: list.length, total: list.length, added, updated, skipped, err: "" });
   }, []);
   const [bulk, setBulk] = useState({ state: "idle", i: 0, total: 0 });
-  const bulkEnrich = useCallback(async () => {
-    const targets = gamesRef.current.filter(g => !g.desc || !g.year || !g.developer || !coversRef.current[g.id]);
+  /* التحديث الشامل: `all=true` يعيد جلب كل شيء (بما فيه ما له بيانات) ويستبدل الغلاف
+     بغلاف مطابق للمنصّة. الافتراضي يكمّل الناقص فقط.
+     السرعة: تنفيذ متوازٍ محدود (6 ألعاب معًا) بدل واحدة تلو الأخرى، وحفظ واحد بالنهاية
+     بدل حفظ كامل المكتبة بعد كل لعبة (كان هذا أبطأ شيء مع مكتبة كبيرة). */
+  const BULK_CONCURRENCY = 6;
+  const bulkEnrich = useCallback(async (all) => {
+    const targets = all
+      ? gamesRef.current.slice()
+      : gamesRef.current.filter(g => !g.desc || !g.year || !g.developer || !coversRef.current[g.id]);
     if (!targets.length) {
       setBulk({ state: "done", i: 0, total: 0 });
       return;
     }
     setBulk({ state: "running", i: 0, total: targets.length });
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i];
-      try {
-        const r = await fetchGameEnrichment(t.name, rawgRef.current, t.platform);
-        if (Number(t.ttbMain) > 0 && r) delete r.ttbMain;
-        const { coverUrl, ...fields } = r;
-        let extra = {};
-        if (coverUrl && !coversRef.current[t.id]) {
-          const ok = await applyCover(t.id, coverUrl);
-          if (ok) extra.hasCover = true;
-        }
-        const cur = gamesRef.current;
-        const list = cur.map(g => g.id === t.id ? { ...g, ...fields, ...extra } : g);
-        setGames(list);
-        gamesRef.current = list;
-        await sset(KEY_GAMES, list);
-      } catch {}
-      setBulk({ state: "running", i: i + 1, total: targets.length });
+    const patches = new Map();
+    let done = 0, cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const t = targets[cursor++];
+        try {
+          const r = await fetchGameEnrichment(t.name, rawgRef.current, t.platform, { skipTrailer: true });
+          if (Number(t.ttbMain) > 0 && r) delete r.ttbMain;
+          const { coverUrl, ...fields } = r;
+          const extra = {};
+          /* الغلاف: نستبدله في الوضع الشامل ليطابق المنصّة، وإلا نملأ الناقص فقط */
+          if (coverUrl && (all || !coversRef.current[t.id])) {
+            const ok = await applyCover(t.id, coverUrl);
+            if (ok) extra.hasCover = true;
+          }
+          patches.set(t.id, { ...fields, ...extra });
+        } catch {}
+        done++;
+        setBulk({ state: "running", i: done, total: targets.length });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(BULK_CONCURRENCY, targets.length) }, worker));
+    if (patches.size) {
+      const list = gamesRef.current.map(g => patches.has(g.id) ? { ...g, ...patches.get(g.id) } : g);
+      setGames(list);
+      gamesRef.current = list;
+      try { await sset(KEY_GAMES, list); } catch {}
     }
     setBulk({ state: "done", i: targets.length, total: targets.length });
   }, [applyCover]);
