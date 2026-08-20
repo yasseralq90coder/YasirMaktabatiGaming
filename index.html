@@ -813,13 +813,13 @@ const BADGES = [{
   icon: "🏃",
   title: "ماراثوني",
   desc: "جلسة واحدة تجاوزت 3 ساعات",
-  check: g => g.some(x => (x.sessions||[]).some(s => s.src !== "backfill" && s.ms >= 10800000))
+  check: g => g.some(x => (x.sessions||[]).some(s => isSitting(s) && s.ms >= 10800000))
 }, {
   id: "mar5",
   icon: "🦾",
   title: "لا يُوقَف",
   desc: "جلسة واحدة تجاوزت 5 ساعات",
-  check: g => g.some(x => (x.sessions||[]).some(s => s.src !== "backfill" && s.ms >= 18000000))
+  check: g => g.some(x => (x.sessions||[]).some(s => isSitting(s) && s.ms >= 18000000))
 }, {
   id: "owl",
   icon: "🦉",
@@ -1871,6 +1871,12 @@ async function raGameProgress(gameId, user, key) {
   };
 }
 const RA_IMPORT_NOTE = "مستوردة من RetroAchievements";
+/* جلسات RA وقت لعب حقيقي بتواريخ حقيقية — ليست "backfill" التعويضية المستثناة من
+   كل الإحصائيات وXP. تمييزها بـ"ra" يُدخلها تلقائيًا في كل فحوص `src !== "backfill"`. */
+const RA_SESSION_SRC = "ra";
+/* الجلسة الواحدة عندنا مجموع يوم كامل من RA لا جلسة جلوس واحدة، فتُستثنى من
+   أوسمة "جلسة واحدة تجاوزت س ساعات" حتى لا تُفتح بغير وجه حق. */
+const isSitting = s => s && s.src !== "backfill" && s.src !== RA_SESSION_SRC;
 /* RA يفهرس نُسخًا فرعية لنفس اللعبة: "[Subset - Bonus]" و"~Hack~" و"~Homebrew~"…
    بدون تجريدها تُستورَد كل نسخة كلعبة مستقلة فتظهر مكرّرة في المكتبة. */
 function raBaseTitle(t) {
@@ -1898,7 +1904,7 @@ function raSessionsFromAchievements(achievements, totalHours) {
   const sessions = days.map(d => ({
     at: new Date(d + "T18:00:00").toISOString(),
     ms: Math.max(60000, Math.round(totalMs * (byDay[d] / totalW))),
-    src: "backfill",
+    src: RA_SESSION_SRC,
     note: RA_IMPORT_NOTE
   }));
   return { sessions, first: days[0], last: days[days.length - 1] };
@@ -5587,6 +5593,13 @@ function migrateGame(g) {
     newG.platform = NSO_PLATFORM[newG.nsoSystem];
     newG.playedOn = newG.playedOn || "Nintendo Switch 2";
   }
+  /* ترميم: جلسات RA المستوردة سابقًا كانت "backfill" فاستُثنيت من كل الإحصائيات
+     وXP والسلاسل. نعيد وسمها كوقت لعب حقيقي فتدخل في كل شيء بتاريخها الصحيح. */
+  if ((newG.sessions || []).some(s => s && s.note === RA_IMPORT_NOTE && s.src === "backfill")) {
+    newG.sessions = newG.sessions.map(s =>
+      s && s.note === RA_IMPORT_NOTE && s.src === "backfill" ? { ...s, src: RA_SESSION_SRC } : s);
+    changed = true;
+  }
   /* ترميم استيراد RetroAchievements: كان `UserTotalPlaytime` يُعامَل كدقائق وهو ثوانٍ،
      فتضخّمت الساعات ×60 (27 ساعة ظهرت 1636 ساعة). نُصلح الساعات والجلسة المستوردة معًا
      — ولا نلمس ساعات أدخلها المستخدم بنفسه (نصحّح فقط إن طابقت القيمة الخاطئة). */
@@ -6950,7 +6963,7 @@ function App() {
           status: prog.numAwarded > 0 && prog.numAwarded >= prog.numAchievements && prog.numAchievements > 0 ? "completed" : "playing",
           hours: raHours,
           // جلسات مؤرَّخة بتواريخ لعبك الحقيقية، لا جلسة واحدة بتاريخ اليوم
-          sessions: dated.sessions.length ? dated.sessions : mkSess(null, raHours, "backfill", RA_IMPORT_NOTE),
+          sessions: dated.sessions.length ? dated.sessions : mkSess(null, raHours, RA_SESSION_SRC, RA_IMPORT_NOTE),
           lastPlayed: lastISO,
           dateAdded: dated.first || localDay(new Date()),
           raGameId: gid, ra: raBlob
