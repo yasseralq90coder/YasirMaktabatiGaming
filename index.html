@@ -1836,6 +1836,12 @@ async function raUserGames(user, key) {
   }
   return out;
 }
+/* آخر ما لعبه المستخدم (طلب واحد، حتى 50) — نستخدمه للمزامنة التلقائية الخفيفة:
+   يعطي NumAchieved و LastPlayed فنعرف ما تغيّر بلا جلب تفاصيل كل لعبة. */
+async function raRecentGames(user, key) {
+  const j = await raFetch("API_GetUserRecentlyPlayedGames.php?u=" + encodeURIComponent(user) + "&c=50", user, key);
+  return Array.isArray(j) ? j : [];
+}
 /* تفاصيل لعبة + تقدّم المستخدم: وقت اللعب بالدقائق وقائمة الإنجازات كاملة */
 async function raGameProgress(gameId, user, key) {
   const j = await raFetch("API_GetGameInfoAndUserProgress.php?g=" + gameId + "&u=" + encodeURIComponent(user), user, key);
@@ -1979,6 +1985,7 @@ const IMG_VER = 2;
 const KEY_RAWG = "gamelib:rawgkey";
 const KEY_RA_USER = "gamelib:rauser";
 const KEY_RA_KEY = "gamelib:rakey";
+const KEY_RA_AUTO = "gamelib:raautoat";
 const KEY_TIMER = "gamelib:timer";
 const KEY_NSOSUB = "gamelib:nsosub";
 const KEY_THEME = "gamelib:theme";
@@ -2707,6 +2714,8 @@ function GameDetail({
   onRemovePlaythrough,
   onLogScoreAttempt,
   onRemoveScoreAttempt,
+  onRaRefresh,
+  raBusy,
   onUpdateNote,
   onSetRunMeta,
   onAddPart,
@@ -2781,6 +2790,9 @@ function GameDetail({
   const [raState, setRaState] = useState("idle"); // idle | loading | done | unsupported | nomatch | nolb | error
   const [raResult, setRaResult] = useState(null);
   const [achTab, setAchTab] = useState("earned");
+  /* لعبة مرتبطة بـRA = وقتها وإنجازاتها تُزامَن تلقائيًا، فالعدّاد اليدوي لا معنى له.
+     لاحظ: ألعاب المحاكي غير المرتبطة بـRA تحتفظ بالعدّاد لأن لا مصدر تلقائي لوقتها. */
+  const raLinked = !!(game.raGameId && game.ra);
   const fetchWorldRecord = async () => {
     if (!raUser || !raKey) { setMsg("أضف اسم مستخدم ومفتاح RetroAchievements من الإعدادات أولًا"); return; }
     setRaState("loading");
@@ -3031,7 +3043,21 @@ function GameDetail({
       background: "#a78bfa22",
       color: "#a78bfa"
     }
-  }, "العدّاد والتختيم سيُسجَّلان على: ", selPart >= 1000 && goals[selPart - 1000] ? "🎯 " + goals[selPart - 1000].name : selPart >= 0 && parts[selPart] ? "🧩 " + parts[selPart].name : "اللعبة كاملة"), /* ===== عدّاد اللعب ===== */
+  }, "العدّاد والتختيم سيُسجَّلان على: ", selPart >= 1000 && goals[selPart - 1000] ? "🎯 " + goals[selPart - 1000].name : selPart >= 0 && parts[selPart] ? "🧩 " + parts[selPart].name : "اللعبة كاملة"),
+  /* ===== لعبة مرتبطة بـRetroAchievements: الوقت والإنجازات تُزامَن تلقائيًا، فلا عدّاد ===== */
+  raLinked ? /*#__PURE__*/React.createElement("div", { className: "timer-section ra-auto-box" },
+    /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "🔄 مزامنة تلقائية من RetroAchievements"),
+    /*#__PURE__*/React.createElement("div", { className: "ra-auto-t" },
+      /*#__PURE__*/React.createElement("b", null, fmtHours(game.hours || 0)),
+      /*#__PURE__*/React.createElement("span", null, "وقت اللعب يُحدَّث تلقائيًا — لا حاجة للعدّاد")),
+    /*#__PURE__*/React.createElement("div", { className: "ra-auto-s" },
+      "آخر مزامنة: ", (game.ra && game.ra.syncedAt) ? relDay(game.ra.syncedAt) : "—",
+      " • يتحدّث عند فتح التطبيق"),
+    /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost", style: { width: "100%", marginTop: 8 },
+      onClick: onRaRefresh, disabled: raBusy
+    }, raBusy ? "⏳ جاري المزامنة…" : "🔄 مزامنة الآن"))
+  : /* ===== عدّاد اللعب ===== */
   /*#__PURE__*/React.createElement("div", {
     className: "timer-section"
   }, /*#__PURE__*/React.createElement("div", {
@@ -6886,6 +6912,76 @@ function App() {
     setCovers(p => { const n = { ...p }; doomed.forEach(id => delete n[id]); return n; });
     syncUnlocks(list, false);
   }, [raJunk]);
+  /* تطبيق تقدّم لعبة واحدة على المكتبة — مشترك بين المزامنة اليدوية والتلقائية
+     حتى لا يتفرّع المنطق ويختلف السلوك بينهما. يرجع added | updated | skipped. */
+  const raApplyGame = useCallback(async (gid, prog) => {
+    if (!prog) return "skipped";
+    if (prog.playtimeSec < RA_MIN_SECONDS) return "skipped";
+    const cur = gamesRef.current;
+    const plat = raPlatformOf(prog.consoleName);
+    const raHours = r1(prog.playtimeSec / 3600);
+    const key = raDedupKey(prog.title, plat);
+    const existing = cur.find(g => String(g.raGameId) === String(gid))
+      || cur.find(g => g.hardware === "emulator" && raDedupKey(g.name, g.platform) === key);
+    const sameGame = existing && String(existing.raGameId) === String(gid);
+    const dated = raSessionsFromAchievements(prog.achievements, raHours);
+    const lastISO = dated.last ? new Date(dated.last + "T18:00:00").toISOString() : nowISO();
+    if (existing) {
+      const prevRa = existing.ra || {};
+      const mergedAch = sameGame ? prog.achievements : (() => {
+        const m = new Map();
+        for (const a of prevRa.achievements || []) m.set(a.id, a);
+        for (const a of prog.achievements) m.set(a.id, a);
+        return [...m.values()];
+      })();
+      const raBlob = {
+        gameId: sameGame ? gid : (prevRa.gameId || gid),
+        numAchievements: sameGame ? prog.numAchievements : mergedAch.length,
+        numAwarded: sameGame ? prog.numAwarded : mergedAch.filter(a => a.earned).length,
+        numAwardedHardcore: sameGame ? prog.numAwardedHardcore : mergedAch.filter(a => a.hardcore).length,
+        completion: prog.completion, guideUrl: prog.guideUrl || prevRa.guideUrl || "",
+        achievements: mergedAch, syncedAt: prog.syncedAt,
+        playtimeSec: sameGame ? prog.playtimeSec : (Number(prevRa.playtimeSec) || 0) + prog.playtimeSec
+      };
+      const totalHours = sameGame ? raHours : r1((Number(prevRa.playtimeSec) || 0) / 3600 + raHours);
+      const keepHours = Math.max(Number(existing.hours) || 0, totalHours);
+      const mine = (existing.sessions || []).filter(s => !(s && s.note === RA_IMPORT_NOTE));
+      const reSess = raSessionsFromAchievements(raBlob.achievements, totalHours);
+      const olderAdd = dated.first && dated.first < (existing.dateAdded || "9999")
+        ? dated.first : (existing.dateAdded || dated.first || localDay(new Date()));
+      const newerPlay = String(existing.lastPlayed || "") > lastISO ? existing.lastPlayed : lastISO;
+      const next = gamesRef.current.map(g => g.id === existing.id ? {
+        ...g, raGameId: raBlob.gameId, ra: raBlob, hours: keepHours,
+        sessions: [...mine, ...reSess.sessions],
+        dateAdded: olderAdd, lastPlayed: newerPlay
+      } : g);
+      setGames(next); gamesRef.current = next;
+      try { await sset(KEY_GAMES, next); } catch {}
+      setDetail(p => p && p.game.id === existing.id ? { ...p, game: next.find(x => x.id === existing.id) } : p);
+      return "updated";
+    }
+    const raBlob = {
+      gameId: gid, numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
+      numAwardedHardcore: prog.numAwardedHardcore, completion: prog.completion,
+      guideUrl: prog.guideUrl, achievements: prog.achievements, syncedAt: prog.syncedAt,
+      playtimeSec: prog.playtimeSec
+    };
+    const ng = {
+      ...blankGame(), id: makeId(), name: raBaseTitle(prog.title) || prog.title, platform: plat,
+      hardware: "emulator", emuDevice: "pc", type: "downloaded",
+      status: prog.numAwarded > 0 && prog.numAwarded >= prog.numAchievements && prog.numAchievements > 0 ? "completed" : "playing",
+      hours: raHours,
+      sessions: dated.sessions.length ? dated.sessions : mkSess(null, raHours, RA_SESSION_SRC, RA_IMPORT_NOTE),
+      lastPlayed: lastISO,
+      dateAdded: dated.first || localDay(new Date()),
+      raGameId: gid, ra: raBlob
+    };
+    const next = [ng, ...gamesRef.current];
+    setGames(next); gamesRef.current = next;
+    try { await sset(KEY_GAMES, next); } catch {}
+    return "added";
+  }, []);
+
   const raSync = useCallback(async () => {
     const u = raUserRef.current, k = raKeyRef.current;
     if (!u || !k) { setRaImp({ state: "error", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
@@ -6901,83 +6997,67 @@ function App() {
       setRaImp(p => ({ ...p, state: "running", i: i + 1, total: list.length, added, updated, skipped }));
       let prog = null;
       try { prog = await raGameProgress(gid, u, k); } catch (e) {}
-      if (!prog) { skipped++; continue; }
-      if (prog.playtimeSec < RA_MIN_SECONDS) { skipped++; continue; }
-      const cur = gamesRef.current;
-      const plat = raPlatformOf(prog.consoleName);
-      const raHours = r1(prog.playtimeSec / 3600);
-      /* المطابقة: بمعرّف RA أولًا، ثم بالاسم المجرَّد من وسوم النُسخ الفرعية + نفس المنصّة،
-         حتى لا تُستورَد "[Subset]" و"~Hack~" كألعاب مكرّرة. */
-      const key = raDedupKey(prog.title, plat);
-      const existing = cur.find(g => String(g.raGameId) === String(gid))
-        || cur.find(g => g.hardware === "emulator" && raDedupKey(g.name, g.platform) === key);
-      const sameGame = existing && String(existing.raGameId) === String(gid);
-      const dated = raSessionsFromAchievements(prog.achievements, raHours);
-      const lastISO = dated.last ? new Date(dated.last + "T18:00:00").toISOString() : nowISO();
-      if (existing) {
-        const prevRa = existing.ra || {};
-        /* نفس اللعبة → استبدال كامل. نسخة فرعية → دمج الإنجازات باتحاد المعرّفات. */
-        const mergedAch = sameGame ? prog.achievements : (() => {
-          const m = new Map();
-          for (const a of prevRa.achievements || []) m.set(a.id, a);
-          for (const a of prog.achievements) m.set(a.id, a);
-          return [...m.values()];
-        })();
-        const raBlob = {
-          gameId: sameGame ? gid : (prevRa.gameId || gid),
-          numAchievements: sameGame ? prog.numAchievements : mergedAch.length,
-          numAwarded: sameGame ? prog.numAwarded : mergedAch.filter(a => a.earned).length,
-          numAwardedHardcore: sameGame ? prog.numAwardedHardcore : mergedAch.filter(a => a.hardcore).length,
-          completion: prog.completion, guideUrl: prog.guideUrl || prevRa.guideUrl || "",
-          achievements: mergedAch, syncedAt: prog.syncedAt,
-          playtimeSec: sameGame ? prog.playtimeSec : (Number(prevRa.playtimeSec) || 0) + prog.playtimeSec
-        };
-        const totalHours = sameGame ? raHours : r1((Number(prevRa.playtimeSec) || 0) / 3600 + raHours);
-        // لا نُنقص ساعات سجّلها المستخدم يدويًا
-        const keepHours = Math.max(Number(existing.hours) || 0, totalHours);
-        // نستبدل جلسات الاستيراد فقط ونُبقي جلسات المستخدم كما هي
-        const mine = (existing.sessions || []).filter(s => !(s && s.note === RA_IMPORT_NOTE));
-        const reSess = raSessionsFromAchievements(raBlob.achievements, totalHours);
-        const olderAdd = dated.first && dated.first < (existing.dateAdded || "9999")
-          ? dated.first : (existing.dateAdded || dated.first || localDay(new Date()));
-        const newerPlay = String(existing.lastPlayed || "") > lastISO ? existing.lastPlayed : lastISO;
-        const next = gamesRef.current.map(g => g.id === existing.id ? {
-          ...g, raGameId: raBlob.gameId, ra: raBlob, hours: keepHours,
-          sessions: [...mine, ...reSess.sessions],
-          dateAdded: olderAdd, lastPlayed: newerPlay
-        } : g);
-        setGames(next); gamesRef.current = next;
-        try { await sset(KEY_GAMES, next); } catch {}
-        setDetail(p => p && p.game.id === existing.id ? { ...p, game: next.find(x => x.id === existing.id) } : p);
-        updated++;
-      } else {
-        const raBlob = {
-          gameId: gid, numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
-          numAwardedHardcore: prog.numAwardedHardcore, completion: prog.completion,
-          guideUrl: prog.guideUrl, achievements: prog.achievements, syncedAt: prog.syncedAt,
-          playtimeSec: prog.playtimeSec
-        };
-        const ng = {
-          ...blankGame(), id: makeId(), name: raBaseTitle(prog.title) || prog.title, platform: plat,
-          hardware: "emulator", emuDevice: "pc", type: "downloaded",
-          status: prog.numAwarded > 0 && prog.numAwarded >= prog.numAchievements && prog.numAchievements > 0 ? "completed" : "playing",
-          hours: raHours,
-          // جلسات مؤرَّخة بتواريخ لعبك الحقيقية، لا جلسة واحدة بتاريخ اليوم
-          sessions: dated.sessions.length ? dated.sessions : mkSess(null, raHours, RA_SESSION_SRC, RA_IMPORT_NOTE),
-          lastPlayed: lastISO,
-          dateAdded: dated.first || localDay(new Date()),
-          raGameId: gid, ra: raBlob
-        };
-        const next = [ng, ...gamesRef.current];
-        setGames(next); gamesRef.current = next;
-        try { await sset(KEY_GAMES, next); } catch {}
-        added++;
-      }
-      await new Promise(r => setTimeout(r, 260)); // احترام حدود معدّل RA
+      const res = await raApplyGame(gid, prog);
+      if (res === "added") added++; else if (res === "updated") updated++; else skipped++;
+      await new Promise(r => setTimeout(r, 260));
     }
     try { await sset(KEY_GAMES, gamesRef.current); } catch {}
+    try { await sset(KEY_RA_AUTO, Date.now()); } catch {}
     setRaImp({ state: "done", i: list.length, total: list.length, added, updated, skipped, err: "" });
-  }, []);
+  }, [raApplyGame]);
+
+  /* ---------- المزامنة التلقائية (خفيفة) ----------
+     لا نُعيد جلب كل الألعاب: نقرأ آخر ما لعبته من RA (طلب واحد)، ونجلب تفاصيل لعبة
+     فقط إن تغيّر عدد إنجازاتها أو تاريخ لعبها عمّا هو مخزَّن — غالبًا صفر طلبات.
+     تعمل بصمت عند فتح التطبيق بفاصل ساعتين على الأقل. */
+  const RA_AUTO_MIN_GAP_MS = 2 * 3600 * 1000;
+  const [raAuto, setRaAuto] = useState({ state: "idle", changed: 0 });
+  const raAutoRunning = useRef(false);
+  const raAutoSync = useCallback(async (force) => {
+    const u = raUserRef.current, k = raKeyRef.current;
+    if (!u || !k || raAutoRunning.current) return;
+    if (!force) {
+      try {
+        const last = await sget(KEY_RA_AUTO);
+        if (last && Date.now() - Number(last) < RA_AUTO_MIN_GAP_MS) return;
+      } catch {}
+    }
+    raAutoRunning.current = true;
+    setRaAuto({ state: "running", changed: 0 });
+    let changed = 0;
+    try {
+      const recent = await raRecentGames(u, k);
+      for (const row of recent) {
+        const gid = row.GameID != null ? row.GameID : row.gameId;
+        const mine = gamesRef.current.find(g => String(g.raGameId) === String(gid));
+        const awarded = Number(row.NumAchieved != null ? row.NumAchieved : row.numAchieved) || 0;
+        const rowDay = String(row.LastPlayed || row.lastPlayed || "").slice(0, 10);
+        if (mine) {
+          const known = Number((mine.ra || {}).numAwarded) || 0;
+          const knownDay = String(mine.lastPlayed || "").slice(0, 10);
+          if (awarded === known && rowDay && knownDay && rowDay <= knownDay) continue;
+        }
+        let prog = null;
+        try { prog = await raGameProgress(gid, u, k); } catch (e) {}
+        const res = await raApplyGame(gid, prog);
+        if (res !== "skipped") changed++;
+        await new Promise(r => setTimeout(r, 260));
+      }
+      try { await sset(KEY_GAMES, gamesRef.current); } catch {}
+      try { await sset(KEY_RA_AUTO, Date.now()); } catch {}
+      if (changed) syncUnlocks(gamesRef.current, true);
+      setRaAuto({ state: "done", changed: changed });
+    } catch (e) {
+      setRaAuto({ state: "error", changed: changed });
+    }
+    raAutoRunning.current = false;
+  }, [raApplyGame]);
+  useEffect(() => {
+    if (!loaded || !raUser || !raKey) return;
+    const t = setTimeout(function () { raAutoSync(false); }, 4000);
+    return function () { clearTimeout(t); };
+  }, [loaded, raUser, raKey, raAutoSync]);
+
   const [bulk, setBulk] = useState({ state: "idle", i: 0, total: 0 });
   /* التحديث الشامل: `all=true` يعيد جلب كل شيء (بما فيه ما له بيانات) ويستبدل الغلاف
      بغلاف مطابق للمنصّة. الافتراضي يكمّل الناقص فقط.
@@ -8170,6 +8250,8 @@ function App() {
     onRemovePlaythrough: (id, idx) => deleteRun(id, { t: "m", i: idx }),
     onLogScoreAttempt: logScoreAttempt,
     onRemoveScoreAttempt: removeScoreAttempt,
+    onRaRefresh: () => raAutoSync(true),
+    raBusy: raAuto.state === "running",
     onUpdateNote: updateNote,
     onSetRunMeta: setRunMeta,
     onAddPart: addPart,
@@ -9068,6 +9150,11 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .arcade-rank-badge{ padding:3px 10px; border-radius:999px; background:linear-gradient(90deg,rgba(255,95,162,.16),rgba(124,92,255,.16) 45%,rgba(34,211,238,.16)); border:1px solid rgba(124,92,255,.35); color:#e3d9ff !important; }
 /* ---- إنجازات RetroAchievements ---- */
 .ra-box{ border-color:rgba(255,193,68,.28); }
+.ra-auto-box{ border-color:rgba(74,222,128,.32); }
+.ra-auto-t{ display:flex; align-items:baseline; gap:8px; }
+.ra-auto-t b{ font-family:var(--num); font-size:22px; color:#4ade80; }
+.ra-auto-t span{ font-size:11.5px; color:var(--txt-3); }
+.ra-auto-s{ font-size:10.5px; color:var(--txt-4); margin-top:4px; }
 .ra-prog{ position:relative; height:16px; border-radius:999px; background:var(--well); overflow:hidden; margin:8px 0 4px; border:1px solid var(--hair); }
 .ra-prog-fill{ height:100%; background:linear-gradient(90deg,#f5b942,#ffd479); transition:width .5s var(--ease); }
 .ra-prog-t{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; font-family:var(--num); color:#0b0d17; text-shadow:0 0 3px rgba(255,255,255,.5); }
