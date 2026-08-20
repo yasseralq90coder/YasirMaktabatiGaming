@@ -1800,7 +1800,7 @@ async function raGameProgress(gameId, user, key) {
     gameId: gameId,
     title: j.Title || j.title || "",
     consoleName: j.ConsoleName || j.consoleName || "",
-    playtimeMin: Number(j.UserTotalPlaytime) || 0,
+    playtimeSec: Number(j.UserTotalPlaytime) || 0, /* ثوانٍ فعليًا — تحقّقنا منه ببيانات حقيقية */
     numAchievements: Number(j.NumAchievements) || achievements.length,
     numAwarded: Number(j.NumAwardedToUser) || 0,
     numAwardedHardcore: Number(j.NumAwardedToUserHardcore) || 0,
@@ -1811,6 +1811,7 @@ async function raGameProgress(gameId, user, key) {
     syncedAt: nowISO()
   };
 }
+const RA_IMPORT_NOTE = "مستوردة من RetroAchievements";
 const raGameUrl = id => "https://retroachievements.org/game/" + id;
 const raAchUrl = id => "https://retroachievements.org/achievement/" + id;
 
@@ -5448,6 +5449,22 @@ function migrateGame(g) {
     newG.platform = NSO_PLATFORM[newG.nsoSystem];
     newG.playedOn = newG.playedOn || "Nintendo Switch 2";
   }
+  /* ترميم استيراد RetroAchievements: كان `UserTotalPlaytime` يُعامَل كدقائق وهو ثوانٍ،
+     فتضخّمت الساعات ×60 (27 ساعة ظهرت 1636 ساعة). نُصلح الساعات والجلسة المستوردة معًا
+     — ولا نلمس ساعات أدخلها المستخدم بنفسه (نصحّح فقط إن طابقت القيمة الخاطئة). */
+  if (newG.ra && newG.ra.playtimeMin != null) {
+    const raw = Number(newG.ra.playtimeMin) || 0;      // القيمة الخام (ثوانٍ فعليًا)
+    const wrongH = r1(raw / 60), rightH = r1(raw / 3600);
+    const ra2 = { ...newG.ra, playtimeSec: raw };
+    delete ra2.playtimeMin;
+    newG.ra = ra2;
+    if (Math.abs((Number(newG.hours) || 0) - wrongH) < 0.15) {
+      newG.hours = rightH;
+      newG.sessions = (newG.sessions || []).map(s =>
+        s && s.note === RA_IMPORT_NOTE ? { ...s, ms: Math.round(rightH * 3600000) } : s);
+    }
+    changed = true;
+  }
   return { game: newG, changed };
 }
 function migrateGamesList(list) {
@@ -5910,6 +5927,8 @@ function BackupView({
   onSaveRaCreds,
   raImp,
   onRaSync,
+  raJunkCount,
+  onRaCleanup,
   bulk,
   onBulkEnrich,
   ttbBulk,
@@ -6263,7 +6282,15 @@ function BackupView({
     raImp.state === "done" && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" },
       "تمت المزامنة ✓ — أُضيفت ", /*#__PURE__*/React.createElement("b", null, raImp.added), " لعبة، حُدِّثت ",
       /*#__PURE__*/React.createElement("b", null, raImp.updated), "، وتُخطّيت ", /*#__PURE__*/React.createElement("b", null, raImp.skipped), " (أقل من ساعتين)"),
-    raImp.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raImp.err || "تعذّرت المزامنة")),
+    raImp.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raImp.err || "تعذّرت المزامنة"),
+    raJunkCount > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 10 } },
+      /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
+        "⚠️ عندك ", /*#__PURE__*/React.createElement("b", null, raJunkCount),
+        " لعبة دخلت باستيراد قديم معطوب (كانت العتبة تُقارَن بالدقائق والقيمة بالثواني، فدخل كل ما تجاوز دقيقتين). أوقاتها صُحِّحت الآن، وتقدر تحذفها إن ما تبيها."),
+      /*#__PURE__*/React.createElement("button", {
+        className: "btn ghost danger", style: { width: "100%", marginTop: 6 },
+        onClick: () => { if (window.confirm("حذف " + raJunkCount + " لعبة مستوردة بأقل من ساعتين؟ لن تُحذف أي لعبة سجّلت فيها تختيمة.")) onRaCleanup(); }
+      }, "🧹 حذف الألعاب المستوردة بأقل من ساعتين (" + raJunkCount + ")"))),
   /*#__PURE__*/React.createElement("div", {
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
@@ -6681,8 +6708,25 @@ function App() {
   /* ---------- استيراد/مزامنة RetroAchievements ----------
      يجلب ألعاب حسابك، يقرأ وقت اللعب لكل واحدة، ويستورد فقط ما تجاوز
      ساعتين كألعاب محاكي. الإنجازات تُخزَّن داخل اللعبة (g.ra). */
-  const RA_MIN_MINUTES = 120;
+  const RA_MIN_SECONDS = 2 * 3600; // ساعتان
   const [raImp, setRaImp] = useState({ state: "idle", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" });
+  /* الألعاب التي دخلت خطأً بالعتبة المعطوبة (كانت تُقارَن بالدقائق والقيمة ثوانٍ):
+     نستهدف فقط ما أنشأه الاستيراد نفسه (له جلسة الاستيراد) ولم تلمسه أنت بتختيمة. */
+  const raJunk = useMemo(() => games.filter(g =>
+    g.ra && Number(g.ra.playtimeSec || 0) > 0 && Number(g.ra.playtimeSec) < RA_MIN_SECONDS
+    && (g.sessions || []).some(s => s && s.note === RA_IMPORT_NOTE)
+    && !(g.playthroughs || []).length
+  ), [games]);
+  const raCleanup = useCallback(async () => {
+    const doomed = new Set(raJunk.map(g => g.id));
+    if (!doomed.size) return;
+    const list = gamesRef.current.filter(g => !doomed.has(g.id)).map(g => doomed.has(g.parentId) ? { ...g, parentId: "" } : g);
+    setGames(list); gamesRef.current = list;
+    try { await sset(KEY_GAMES, list); } catch {}
+    await Promise.all([...doomed].map(id => sdel(coverKey(id)).catch(() => {})));
+    setCovers(p => { const n = { ...p }; doomed.forEach(id => delete n[id]); return n; });
+    syncUnlocks(list, false);
+  }, [raJunk]);
   const raSync = useCallback(async () => {
     const u = raUserRef.current, k = raKeyRef.current;
     if (!u || !k) { setRaImp({ state: "error", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
@@ -6699,7 +6743,7 @@ function App() {
       let prog = null;
       try { prog = await raGameProgress(gid, u, k); } catch (e) {}
       if (!prog) { skipped++; continue; }
-      if (prog.playtimeMin < RA_MIN_MINUTES) { skipped++; continue; }
+      if (prog.playtimeSec < RA_MIN_SECONDS) { skipped++; continue; }
       const cur = gamesRef.current;
       const existing = cur.find(g => String(g.raGameId) === String(gid))
         || cur.find(g => g.hardware === "emulator" && lrNorm(g.name) === lrNorm(prog.title));
@@ -6707,11 +6751,11 @@ function App() {
         gameId: gid, numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
         numAwardedHardcore: prog.numAwardedHardcore, completion: prog.completion,
         guideUrl: prog.guideUrl, achievements: prog.achievements, syncedAt: prog.syncedAt,
-        playtimeMin: prog.playtimeMin
+        playtimeSec: prog.playtimeSec
       };
       if (existing) {
         // مزامنة فقط: نحدّث الإنجازات ولا نلمس ساعات المستخدم إن كانت أكبر (بياناته أدق)
-        const keepHours = Math.max(Number(existing.hours) || 0, r1(prog.playtimeMin / 60));
+        const keepHours = Math.max(Number(existing.hours) || 0, r1(prog.playtimeSec / 3600));
         const next = gamesRef.current.map(g => g.id === existing.id ? { ...g, raGameId: gid, ra: raBlob, hours: keepHours } : g);
         setGames(next); gamesRef.current = next;
         try { await sset(KEY_GAMES, next); } catch {}
@@ -6723,8 +6767,8 @@ function App() {
           ...blankGame(), id: makeId(), name: prog.title, platform: plat,
           hardware: "emulator", emuDevice: "pc", type: "downloaded",
           status: prog.numAwarded > 0 && prog.numAwarded >= prog.numAchievements && prog.numAchievements > 0 ? "completed" : "playing",
-          hours: r1(prog.playtimeMin / 60),
-          sessions: mkSess(null, r1(prog.playtimeMin / 60), "backfill", "مستوردة من RetroAchievements"),
+          hours: r1(prog.playtimeSec / 3600),
+          sessions: mkSess(null, r1(prog.playtimeSec / 3600), "backfill", RA_IMPORT_NOTE),
           lastPlayed: nowISO(), dateAdded: localDay(new Date()),
           raGameId: gid, ra: raBlob
         };
@@ -7854,6 +7898,8 @@ function App() {
     onSaveRaCreds: saveRaCreds,
     raImp: raImp,
     onRaSync: raSync,
+    raJunkCount: raJunk.length,
+    onRaCleanup: raCleanup,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
