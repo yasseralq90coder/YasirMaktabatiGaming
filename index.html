@@ -1740,6 +1740,80 @@ async function raWorldRecord(gameId, user, key) {
   };
 }
 
+/* ---------- استيراد ألعاب المستخدم من RetroAchievements ----------
+   ConsoleName في RA ← اسم المنصّة عندنا. أي جهاز غير معروف يبقى "أخرى". */
+/* المطابقة تُزيل المسافات تمامًا ("Nintendo 64" ⇄ "nintendo64")، وتُجرَّب المطابقة
+   التامة أولًا ثم الجزئية بترتيب الأطول فالأقصر — وإلا لالتقط "playstation"
+   اسمَ "PlayStation 2" خطأً وأعطاه منصّة PS1. */
+const raKeyNorm = s => lrNorm(s || "").replace(/\s+/g, "");
+const RA_CONSOLE_TO_PLATFORM = (() => {
+  const m = {};
+  for (const plat of Object.keys(RA_ALIASES)) {
+    m[raKeyNorm(plat)] = plat;
+    for (const a of RA_ALIASES[plat]) m[raKeyNorm(a)] = plat;
+  }
+  return m;
+})();
+const RA_KEYS_BY_LEN = Object.keys(RA_CONSOLE_TO_PLATFORM).sort((a, b) => b.length - a.length);
+function raPlatformOf(consoleName) {
+  const cn = raKeyNorm(consoleName);
+  if (!cn) return "أخرى";
+  if (RA_CONSOLE_TO_PLATFORM[cn]) return RA_CONSOLE_TO_PLATFORM[cn];
+  for (const key of RA_KEYS_BY_LEN) {
+    if (key.length >= 3 && cn.includes(key)) return RA_CONSOLE_TO_PLATFORM[key];
+  }
+  return "أخرى";
+}
+const raBadgeUrl = b => b ? "https://media.retroachievements.org/Badge/" + b + ".png" : "";
+/* كل ألعاب المستخدم التي له فيها تقدّم (مقسّمة صفحات، 500 بالصفحة) */
+async function raUserGames(user, key) {
+  const out = [];
+  for (let off = 0; off < 5000; off += 500) {
+    const j = await raFetch("API_GetUserCompletionProgress.php?u=" + encodeURIComponent(user) + "&c=500&o=" + off, user, key);
+    const rows = (j && Array.isArray(j.Results)) ? j.Results : [];
+    out.push(...rows);
+    const total = j && Number(j.Total) || 0;
+    if (rows.length < 500 || out.length >= total) break;
+  }
+  return out;
+}
+/* تفاصيل لعبة + تقدّم المستخدم: وقت اللعب بالدقائق وقائمة الإنجازات كاملة */
+async function raGameProgress(gameId, user, key) {
+  const j = await raFetch("API_GetGameInfoAndUserProgress.php?g=" + gameId + "&u=" + encodeURIComponent(user), user, key);
+  if (!j) return null;
+  const achObj = j.Achievements || {};
+  const achievements = Object.keys(achObj).map(k => {
+    const a = achObj[k];
+    return {
+      id: a.ID != null ? a.ID : a.id,
+      title: a.Title || a.title || "",
+      desc: a.Description || a.description || "",
+      points: Number(a.Points || a.points) || 0,
+      badge: a.BadgeName || a.badgeName || "",
+      earned: !!(a.DateEarned || a.DateEarnedHardcore),
+      hardcore: !!a.DateEarnedHardcore,
+      date: a.DateEarnedHardcore || a.DateEarned || "",
+      order: Number(a.DisplayOrder || a.displayOrder) || 0
+    };
+  }).sort((x, y) => x.order - y.order || x.id - y.id);
+  return {
+    gameId: gameId,
+    title: j.Title || j.title || "",
+    consoleName: j.ConsoleName || j.consoleName || "",
+    playtimeMin: Number(j.UserTotalPlaytime) || 0,
+    numAchievements: Number(j.NumAchievements) || achievements.length,
+    numAwarded: Number(j.NumAwardedToUser) || 0,
+    numAwardedHardcore: Number(j.NumAwardedToUserHardcore) || 0,
+    completion: j.UserCompletion || j.userCompletion || "",
+    guideUrl: j.GuideURL || j.guideUrl || "",
+    boxArt: j.ImageBoxArt || j.imageBoxArt || "",
+    achievements: achievements,
+    syncedAt: nowISO()
+  };
+}
+const raGameUrl = id => "https://retroachievements.org/game/" + id;
+const raAchUrl = id => "https://retroachievements.org/achievement/" + id;
+
 function compressFromUrl(url, maxW = COVER_W, quality = COVER_Q) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -2593,6 +2667,7 @@ function GameDetail({
   };
   const [raState, setRaState] = useState("idle"); // idle | loading | done | unsupported | nomatch | nolb | error
   const [raResult, setRaResult] = useState(null);
+  const [achTab, setAchTab] = useState("earned");
   const fetchWorldRecord = async () => {
     if (!raUser || !raKey) { setMsg("أضف اسم مستخدم ومفتاح RetroAchievements من الإعدادات أولًا"); return; }
     setRaState("loading");
@@ -3216,6 +3291,55 @@ function GameDetail({
     raState === "nomatch" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 ما لقينا مطابقة لاسم اللعبة — جرّب تعديل الاسم"),
     raState === "nolb" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 اللعبة موجودة لكن بلا لوحة صدارة نتائج"),
     raState === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, "🌍 تعذّر الاتصال — تحقق من المفتاح")),
+  /* ===== إنجازات RetroAchievements — لألعاب المحاكي فقط ===== */
+  game.hardware === "emulator" && game.ra && (() => {
+    const ra = game.ra;
+    const list = ra.achievements || [];
+    const earned = list.filter(a => a.earned);
+    const locked = list.filter(a => !a.earned);
+    const pts_ = earned.reduce((s, a) => s + (Number(a.points) || 0), 0);
+    const totPts = list.reduce((s, a) => s + (Number(a.points) || 0), 0);
+    const pct = ra.numAchievements ? Math.round(earned.length / ra.numAchievements * 100) : 0;
+    const shown = achTab === "earned" ? earned : locked;
+    return /*#__PURE__*/React.createElement("div", { className: "runs-box ra-box" },
+      /*#__PURE__*/React.createElement("div", { className: "runs-head" },
+        /*#__PURE__*/React.createElement("span", null, "🏅 إنجازات RetroAchievements"),
+        /*#__PURE__*/React.createElement("b", null, earned.length, " / ", ra.numAchievements, " • ", pts_, "/", totPts, " نقطة")),
+      /*#__PURE__*/React.createElement("div", { className: "ra-prog" },
+        /*#__PURE__*/React.createElement("div", { className: "ra-prog-fill", style: { width: pct + "%" } }),
+        /*#__PURE__*/React.createElement("span", { className: "ra-prog-t" }, pct, "٪")),
+      ra.numAwardedHardcore > 0 && /*#__PURE__*/React.createElement("div", { className: "ra-hc" }, "🔥 وضع Hardcore: ", ra.numAwardedHardcore, " إنجاز"),
+      /*#__PURE__*/React.createElement("div", { className: "ra-tabs" },
+        /*#__PURE__*/React.createElement("button", {
+          className: "ra-tab" + (achTab === "earned" ? " on" : ""), onClick: () => setAchTab("earned")
+        }, "✅ حصلت عليها (", earned.length, ")"),
+        /*#__PURE__*/React.createElement("button", {
+          className: "ra-tab" + (achTab === "locked" ? " on" : ""), onClick: () => setAchTab("locked")
+        }, "🔒 متبقية (", locked.length, ")")),
+      shown.length === 0
+        ? /*#__PURE__*/React.createElement("div", { className: "runs-empty" }, achTab === "earned" ? "لا إنجازات بعد — العب واسحب المزامنة" : "🎉 كملّتها كلها!")
+        : /*#__PURE__*/React.createElement("div", { className: "ra-list" }, shown.map(a => /*#__PURE__*/React.createElement("div", {
+            key: a.id, className: "ra-item" + (a.earned ? " got" : "")
+          },
+          a.badge
+            ? /*#__PURE__*/React.createElement("img", { className: "ra-badge", src: raBadgeUrl(a.badge), alt: "", loading: "lazy" })
+            : /*#__PURE__*/React.createElement("span", { className: "ra-badge ra-badge-ph" }, a.earned ? "🏅" : "🔒"),
+          /*#__PURE__*/React.createElement("div", { className: "ra-i" },
+            /*#__PURE__*/React.createElement("b", null, a.title, a.hardcore && /*#__PURE__*/React.createElement("span", { title: "Hardcore" }, " 🔥")),
+            /*#__PURE__*/React.createElement("small", null, a.desc),
+            a.earned
+              ? /*#__PURE__*/React.createElement("small", { className: "ra-date" }, "✅ ", String(a.date || "").slice(0, 10))
+              : /*#__PURE__*/React.createElement("a", {
+                  className: "ra-guide", href: ra.guideUrl || raAchUrl(a.id),
+                  target: "_blank", rel: "noopener noreferrer"
+                }, "📖 دليل الحصول عليه")),
+          /*#__PURE__*/React.createElement("span", { className: "ra-pts" }, a.points)))),
+      /*#__PURE__*/React.createElement("a", {
+        className: "btn ghost", style: { width: "100%", marginTop: 8, textAlign: "center", textDecoration: "none", display: "block" },
+        href: raGameUrl(ra.gameId), target: "_blank", rel: "noopener noreferrer"
+      }, "🌐 صفحة اللعبة في RetroAchievements"),
+      ra.syncedAt && /*#__PURE__*/React.createElement("div", { className: "ra-sync" }, "آخر مزامنة: ", relDay(ra.syncedAt)));
+  })(),
   /*#__PURE__*/React.createElement("div", {
     className: "runs-box"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4673,6 +4797,7 @@ function AchievementsView({
   }, [ach]);
   const [tab, setTab] = useState("overview");
   const [rSort, setRSort] = useState("date");
+  const [ragOpen, setRagOpen] = useState("");
   const runs = useMemo(() => {
     const a = playAchievements(games);
     if (rSort === "date") a.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));else if (rSort === "hours") a.sort((x, y) => (Number(y.hours) || 0) - (Number(x.hours) || 0));else if (rSort === "console") a.sort((x, y) => String(x.platform).localeCompare(String(y.platform)));else if (rSort === "kind") a.sort((x, y) => (y.kind === "master") - (x.kind === "master"));else if (rSort === "diff") a.sort((x, y) => String(y.diff).localeCompare(String(x.diff)));else a.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
@@ -4682,7 +4807,7 @@ function AchievementsView({
     className: "stats"
   }, /*#__PURE__*/React.createElement("div", {
     className: "atabs"
-  }, [["overview", "📊 نظرة عامة"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["granks", "🎖️ رتب ألعابي"], ["ranks", "🏆 الرتب"], ["card", "🪪 كرت الجيمر"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+  }, [["overview", "📊 نظرة عامة"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["granks", "🎖️ رتب ألعابي"], ["ranks", "🏆 الرتب"]].concat(games.some(g => g.hardware === "emulator" && g.ra) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
     key: k,
     className: "atab" + (tab === k ? " on" : ""),
     onClick: () => setTab(k)
@@ -5184,7 +5309,67 @@ function AchievementsView({
       key: b.id, className: "bw" + (b.done ? " on" : "") + (b.hidden && !b.done ? " hid" : "")
     }, /*#__PURE__*/React.createElement("span", { className: "bw-ic" }, b.hidden && !b.done ? "❓" : b.icon),
       /*#__PURE__*/React.createElement("b", null, b.hidden && !b.done ? "وسام خفي" : b.title),
-      /*#__PURE__*/React.createElement("span", { className: "bw-d" }, b.hidden && !b.done ? "افتحه لتكتشفه…" : b.desc))))), tab === "overview" && /*#__PURE__*/React.createElement("div", {
+      /*#__PURE__*/React.createElement("span", { className: "bw-d" }, b.hidden && !b.done ? "افتحه لتكتشفه…" : b.desc))))),
+  tab === "racheevos" && (() => {
+    const raGamesList = games.filter(g => g.hardware === "emulator" && g.ra && (g.ra.achievements || []).length)
+      .map(g => {
+        const list = g.ra.achievements || [];
+        const earned = list.filter(a => a.earned);
+        return { g, list, earned, pts: earned.reduce((s, a) => s + (Number(a.points) || 0), 0) };
+      })
+      .sort((a, b) => b.earned.length - a.earned.length || b.pts - a.pts);
+    const totEarned = raGamesList.reduce((s, x) => s + x.earned.length, 0);
+    const totAll = raGamesList.reduce((s, x) => s + (Number(x.g.ra.numAchievements) || x.list.length), 0);
+    const totPts = raGamesList.reduce((s, x) => s + x.pts, 0);
+    const totHC = raGamesList.reduce((s, x) => s + x.earned.filter(a => a.hardcore).length, 0);
+    const mastered = raGamesList.filter(x => x.list.length && x.earned.length >= (Number(x.g.ra.numAchievements) || x.list.length)).length;
+    if (!raGamesList.length) return /*#__PURE__*/React.createElement("div", { className: "rag-empty" }, "لا توجد إنجازات بعد — استورد ألعابك من RetroAchievements عبر الإعدادات 🎮");
+    return /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", { className: "ach-sum", style: { marginTop: 12 } },
+        [["🏅", totEarned, "إنجاز", "#f5b942"], ["🎯", totPts, "نقطة RA", "#a78bfa"], ["🔥", totHC, "هاردكور", "#fb7185"], ["👑", mastered, "مكتملة", "#22d3ee"], ["📊", totAll ? Math.round(totEarned / totAll * 100) + "٪" : "—", "الإنجاز الكلي", "#4ade80"]]
+          .map(([ic, v, l, col], i) => /*#__PURE__*/React.createElement("div", { className: "ach-sum-cell", key: i },
+            /*#__PURE__*/React.createElement("span", { className: "as-ic" }, ic),
+            /*#__PURE__*/React.createElement("b", { style: { color: col } }, v),
+            /*#__PURE__*/React.createElement("span", null, l)))),
+      /*#__PURE__*/React.createElement("div", { className: "section-title" }, "🏅 إنجازاتك حسب اللعبة"),
+      /*#__PURE__*/React.createElement("div", { className: "track-list" }, raGamesList.map(({ g, list, earned, pts }) => {
+        const tot = Number(g.ra.numAchievements) || list.length;
+        const pct = tot ? Math.round(earned.length / tot * 100) : 0;
+        const open = ragOpen === g.id;
+        return /*#__PURE__*/React.createElement("div", { key: g.id, className: "track" },
+          /*#__PURE__*/React.createElement("div", { className: "rag-head", onClick: () => setRagOpen(open ? "" : g.id) },
+            covers[g.id]
+              ? /*#__PURE__*/React.createElement("img", { src: covers[g.id], alt: "", loading: "lazy" })
+              : /*#__PURE__*/React.createElement("span", { className: "track-ic" }, "🎮"),
+            /*#__PURE__*/React.createElement("div", { className: "rag-t" },
+              /*#__PURE__*/React.createElement("b", null, g.name, pct >= 100 ? " 👑" : ""),
+              /*#__PURE__*/React.createElement("small", null, g.platform, " • ", pts, " نقطة • ", fmtHours(g.hours || 0))),
+            /*#__PURE__*/React.createElement("span", { className: "rag-n" }, earned.length, "/", tot)),
+          /*#__PURE__*/React.createElement("div", { className: "ra-prog" },
+            /*#__PURE__*/React.createElement("div", { className: "ra-prog-fill", style: { width: pct + "%" } }),
+            /*#__PURE__*/React.createElement("span", { className: "ra-prog-t" }, pct, "٪")),
+          open && /*#__PURE__*/React.createElement("div", { className: "ra-list", style: { marginTop: 8 } },
+            list.slice().sort((a, b) => (b.earned ? 1 : 0) - (a.earned ? 1 : 0)).map(a => /*#__PURE__*/React.createElement("div", {
+              key: a.id, className: "ra-item" + (a.earned ? " got" : "")
+            },
+              a.badge
+                ? /*#__PURE__*/React.createElement("img", { className: "ra-badge", src: raBadgeUrl(a.badge), alt: "", loading: "lazy" })
+                : /*#__PURE__*/React.createElement("span", { className: "ra-badge ra-badge-ph" }, a.earned ? "🏅" : "🔒"),
+              /*#__PURE__*/React.createElement("div", { className: "ra-i" },
+                /*#__PURE__*/React.createElement("b", null, a.title, a.hardcore && " 🔥"),
+                /*#__PURE__*/React.createElement("small", null, a.desc),
+                a.earned
+                  ? /*#__PURE__*/React.createElement("small", { className: "ra-date" }, "✅ ", String(a.date || "").slice(0, 10))
+                  : /*#__PURE__*/React.createElement("a", {
+                      className: "ra-guide", href: g.ra.guideUrl || raAchUrl(a.id), target: "_blank", rel: "noopener noreferrer"
+                    }, "📖 دليل الحصول عليه")),
+              /*#__PURE__*/React.createElement("span", { className: "ra-pts" }, a.points)))),
+          !open && earned.length > 0 && /*#__PURE__*/React.createElement("div", { className: "rag-grid" },
+            earned.slice(0, 14).map(a => a.badge
+              ? /*#__PURE__*/React.createElement("img", { key: a.id, src: raBadgeUrl(a.badge), alt: a.title, title: a.title, loading: "lazy" })
+              : null)));
+      })));
+  })(), tab === "overview" && /*#__PURE__*/React.createElement("div", {
     className: "section-title"
   }, "المكتبة حسب العائلة"), tab === "overview" && /*#__PURE__*/React.createElement("div", {
     className: "family-bars"
@@ -5723,6 +5908,8 @@ function BackupView({
   raUser,
   raKey,
   onSaveRaCreds,
+  raImp,
+  onRaSync,
   bulk,
   onBulkEnrich,
   ttbBulk,
@@ -6055,7 +6242,29 @@ function BackupView({
     disabled: raUserDraft.trim() === (raUser || "") && raKeyDraft.trim() === (raKey || "")
   }, "حفظ"), (raSaved || (raUser && raKey)) && /*#__PURE__*/React.createElement("div", {
     className: "auto-msg done"
-  }, (raUser && raKey) ? "الحساب مُفعّل ✓" : "—")), /*#__PURE__*/React.createElement("div", {
+  }, (raUser && raKey) ? "الحساب مُفعّل ✓" : "—")),
+  /*#__PURE__*/React.createElement("div", { className: "bk-card" },
+    /*#__PURE__*/React.createElement("div", { className: "bk-title" }, "🎮 استيراد ألعابي من RetroAchievements"),
+    /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
+      "يجلب ألعاب حسابك مع أوقات اللعب الحقيقية وإنجازاتك، ويضيف ",
+      /*#__PURE__*/React.createElement("b", null, "فقط الألعاب التي لعبتها ساعتين فأكثر"),
+      " كألعاب محاكي. الألعاب الموجودة عندك تُحدَّث إنجازاتها بلا تكرار، ولا تُنقص ساعاتك المسجّلة يدويًا. أعد التشغيل وقتما شئت للمزامنة."),
+    /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
+      /*#__PURE__*/React.createElement("button", {
+        className: "btn auto",
+        onClick: onRaSync,
+        disabled: raImp.state === "running" || !raUser || !raKey
+      }, raImp.state === "running"
+        ? "⏳ " + raImp.i + " / " + (raImp.total || "…")
+        : "🎮 استيراد / مزامنة الألعاب والإنجازات")),
+    !raUser || !raKey ? /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "أضف اسم المستخدم والمفتاح بالأعلى أولًا") : null,
+    raImp.state === "running" && /*#__PURE__*/React.createElement("div", { className: "bk-progress" },
+      /*#__PURE__*/React.createElement("div", { className: "bk-progress-fill", style: { width: Math.round(raImp.i / Math.max(1, raImp.total) * 100) + "%" } })),
+    raImp.state === "done" && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" },
+      "تمت المزامنة ✓ — أُضيفت ", /*#__PURE__*/React.createElement("b", null, raImp.added), " لعبة، حُدِّثت ",
+      /*#__PURE__*/React.createElement("b", null, raImp.updated), "، وتُخطّيت ", /*#__PURE__*/React.createElement("b", null, raImp.skipped), " (أقل من ساعتين)"),
+    raImp.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raImp.err || "تعذّرت المزامنة")),
+  /*#__PURE__*/React.createElement("div", {
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
@@ -6278,6 +6487,9 @@ function App() {
   const [rawgKey, setRawgKey] = useState("");
   const [raUser, setRaUser] = useState("");
   const [raKey, setRaKey] = useState("");
+  const raUserRef = useRef(""), raKeyRef = useRef("");
+  useEffect(() => { raUserRef.current = raUser; }, [raUser]);
+  useEffect(() => { raKeyRef.current = raKey; }, [raKey]);
   useEffect(() => {
     (async () => {
       try { const u = await sget(KEY_RA_USER); if (typeof u === "string") setRaUser(u); } catch {}
@@ -6286,6 +6498,7 @@ function App() {
   }, []);
   const saveRaCreds = useCallback(async (u, k) => {
     setRaUser(u); setRaKey(k);
+    raUserRef.current = u; raKeyRef.current = k;
     try { await sset(KEY_RA_USER, u); await sset(KEY_RA_KEY, k); } catch {}
   }, []);
   const [timer, setTimer] = useState(null);
@@ -6464,6 +6677,66 @@ function App() {
   const saveNsoSub = useCallback(async v => {
     setNsoSub(v);
     try { await sset(KEY_NSOSUB, v); } catch {}
+  }, []);
+  /* ---------- استيراد/مزامنة RetroAchievements ----------
+     يجلب ألعاب حسابك، يقرأ وقت اللعب لكل واحدة، ويستورد فقط ما تجاوز
+     ساعتين كألعاب محاكي. الإنجازات تُخزَّن داخل اللعبة (g.ra). */
+  const RA_MIN_MINUTES = 120;
+  const [raImp, setRaImp] = useState({ state: "idle", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" });
+  const raSync = useCallback(async () => {
+    const u = raUserRef.current, k = raKeyRef.current;
+    if (!u || !k) { setRaImp({ state: "error", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
+    setRaImp({ state: "running", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" });
+    let list;
+    try { list = await raUserGames(u, k); }
+    catch (e) { setRaImp({ state: "error", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "تعذّر جلب قائمة الألعاب — تحقق من الاسم والمفتاح" }); return; }
+    if (!list.length) { setRaImp({ state: "done", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" }); return; }
+    let added = 0, updated = 0, skipped = 0;
+    for (let i = 0; i < list.length; i++) {
+      const row = list[i];
+      const gid = row.GameID != null ? row.GameID : row.gameId;
+      setRaImp(p => ({ ...p, state: "running", i: i + 1, total: list.length, added, updated, skipped }));
+      let prog = null;
+      try { prog = await raGameProgress(gid, u, k); } catch (e) {}
+      if (!prog) { skipped++; continue; }
+      if (prog.playtimeMin < RA_MIN_MINUTES) { skipped++; continue; }
+      const cur = gamesRef.current;
+      const existing = cur.find(g => String(g.raGameId) === String(gid))
+        || cur.find(g => g.hardware === "emulator" && lrNorm(g.name) === lrNorm(prog.title));
+      const raBlob = {
+        gameId: gid, numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
+        numAwardedHardcore: prog.numAwardedHardcore, completion: prog.completion,
+        guideUrl: prog.guideUrl, achievements: prog.achievements, syncedAt: prog.syncedAt,
+        playtimeMin: prog.playtimeMin
+      };
+      if (existing) {
+        // مزامنة فقط: نحدّث الإنجازات ولا نلمس ساعات المستخدم إن كانت أكبر (بياناته أدق)
+        const keepHours = Math.max(Number(existing.hours) || 0, r1(prog.playtimeMin / 60));
+        const next = gamesRef.current.map(g => g.id === existing.id ? { ...g, raGameId: gid, ra: raBlob, hours: keepHours } : g);
+        setGames(next); gamesRef.current = next;
+        try { await sset(KEY_GAMES, next); } catch {}
+        setDetail(p => p && p.game.id === existing.id ? { ...p, game: next.find(x => x.id === existing.id) } : p);
+        updated++;
+      } else {
+        const plat = raPlatformOf(prog.consoleName);
+        const ng = {
+          ...blankGame(), id: makeId(), name: prog.title, platform: plat,
+          hardware: "emulator", emuDevice: "pc", type: "downloaded",
+          status: prog.numAwarded > 0 && prog.numAwarded >= prog.numAchievements && prog.numAchievements > 0 ? "completed" : "playing",
+          hours: r1(prog.playtimeMin / 60),
+          sessions: mkSess(null, r1(prog.playtimeMin / 60), "backfill", "مستوردة من RetroAchievements"),
+          lastPlayed: nowISO(), dateAdded: localDay(new Date()),
+          raGameId: gid, ra: raBlob
+        };
+        const next = [ng, ...gamesRef.current];
+        setGames(next); gamesRef.current = next;
+        try { await sset(KEY_GAMES, next); } catch {}
+        added++;
+      }
+      await new Promise(r => setTimeout(r, 260)); // احترام حدود معدّل RA
+    }
+    try { await sset(KEY_GAMES, gamesRef.current); } catch {}
+    setRaImp({ state: "done", i: list.length, total: list.length, added, updated, skipped, err: "" });
   }, []);
   const [bulk, setBulk] = useState({ state: "idle", i: 0, total: 0 });
   const bulkEnrich = useCallback(async () => {
@@ -7579,6 +7852,8 @@ function App() {
     raUser: raUser,
     raKey: raKey,
     onSaveRaCreds: saveRaCreds,
+    raImp: raImp,
+    onRaSync: raSync,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
@@ -8533,6 +8808,38 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .sec-t{ font-size:17px; font-weight:800; letter-spacing:-.4px; }
 .sec-n{ font-size:12px; color:var(--txt-4); font-weight:700; }
 .arcade-rank-badge{ padding:3px 10px; border-radius:999px; background:linear-gradient(90deg,rgba(255,95,162,.16),rgba(124,92,255,.16) 45%,rgba(34,211,238,.16)); border:1px solid rgba(124,92,255,.35); color:#e3d9ff !important; }
+/* ---- إنجازات RetroAchievements ---- */
+.ra-box{ border-color:rgba(255,193,68,.28); }
+.ra-prog{ position:relative; height:16px; border-radius:999px; background:var(--well); overflow:hidden; margin:8px 0 4px; border:1px solid var(--hair); }
+.ra-prog-fill{ height:100%; background:linear-gradient(90deg,#f5b942,#ffd479); transition:width .5s var(--ease); }
+.ra-prog-t{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; font-family:var(--num); color:#0b0d17; text-shadow:0 0 3px rgba(255,255,255,.5); }
+.ra-hc{ font-size:10.5px; color:#fb7185; font-weight:700; margin-bottom:6px; }
+.ra-tabs{ display:flex; gap:6px; margin:8px 0; }
+.ra-tab{ flex:1; padding:7px 8px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); color:var(--txt-3); font-family:inherit; font-size:11px; font-weight:700; cursor:pointer; transition:.16s var(--sp); }
+.ra-tab.on{ background:rgba(245,185,66,.14); border-color:rgba(245,185,66,.5); color:#f5b942; }
+.ra-list{ display:flex; flex-direction:column; gap:6px; max-height:420px; overflow-y:auto; }
+.ra-item{ display:flex; align-items:center; gap:9px; padding:8px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); }
+.ra-item.got{ border-color:rgba(74,222,128,.3); background:rgba(74,222,128,.05); }
+.ra-badge{ width:38px; height:38px; border-radius:9px; flex:none; object-fit:cover; }
+.ra-item:not(.got) .ra-badge{ filter:grayscale(1) brightness(.6); }
+.ra-badge-ph{ display:flex; align-items:center; justify-content:center; background:var(--well); font-size:17px; }
+.ra-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ra-i b{ font-size:12px; font-weight:800; }
+.ra-i small{ font-size:10.5px; color:var(--txt-3); line-height:1.35; }
+.ra-date{ color:#4ade80 !important; font-weight:700; }
+.ra-guide{ font-size:10.5px; color:#a78bfa; text-decoration:none; font-weight:700; align-self:flex-start; }
+.ra-pts{ flex:none; font-family:var(--num); font-size:12px; font-weight:800; color:#f5b942; }
+.ra-sync{ font-size:10px; color:var(--txt-4); text-align:center; margin-top:6px; }
+/* ---- تبويب إنجازات RA في الإحصائيات ---- */
+.rag-head{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); cursor:pointer; }
+.rag-head img{ width:34px; height:34px; border-radius:8px; flex:none; object-fit:cover; }
+.rag-head .rag-t{ flex:1; min-width:0; }
+.rag-head b{ display:block; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rag-head small{ font-size:10.5px; color:var(--txt-3); }
+.rag-n{ flex:none; font-family:var(--num); font-size:11.5px; font-weight:800; color:#f5b942; }
+.rag-grid{ display:flex; flex-wrap:wrap; gap:6px; padding:8px 4px 2px; }
+.rag-grid img{ width:44px; height:44px; border-radius:9px; object-fit:cover; }
+.rag-empty{ text-align:center; color:var(--txt-4); font-size:12px; padding:22px 12px; }
 .rail{ display:flex; gap:11px; overflow-x:auto; padding:2px 16px 6px; scroll-snap-type:x mandatory; scrollbar-width:none; }
 .rail::-webkit-scrollbar{ display:none; }
 .rail > *{ scroll-snap-align:start; flex:none; width:104px; }
