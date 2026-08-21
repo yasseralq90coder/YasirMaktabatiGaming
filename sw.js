@@ -30,7 +30,8 @@ self.addEventListener("activate", event => {
   event.waitUntil(
     Promise.all([
       caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))),
-      self.clients.claim()
+      self.clients.claim(),
+      rearmFromIDB()   /* SW جديد بعد تحديث: استعد أي عدّاد شغّال */
     ])
   );
 });
@@ -39,6 +40,9 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const req = event.request;
   if (req.method !== "GET") return;
+  /* أي طلب يعني أن SW حيّ الآن — أرخص إشارة إيقاظ. rearmFromIDB تخرج فورًا
+     إن كان المؤقّت مسلَّحًا، فلا كلفة على الطلبات المتتابعة. */
+  rearmFromIDB();
   const url = new URL(req.url);
   const isAppShell = url.origin === self.location.origin;
 
@@ -69,6 +73,22 @@ function fmtMin(ms) {
   const total = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(total / 60), m = total % 60;
   return (h ? h + "س " : "") + m + "د";
+}
+
+/* استرجاع حالة العدّاد من IndexedDB وإعادة تسليح المؤقّت — يُستدعى عند كل
+   إيقاظ محتمل لـSW. مصدر الحقيقة هو gamelib:timer الذي تكتبه الصفحة، فلا
+   يوجد نظام تذكير ثانٍ (تكرار المنطق كان سبب باگ «يرجع بعد 30 دقيقة»). */
+let rearming = false;
+async function rearmFromIDB() {
+  if (rearming || nagState) return;   // حيّ بالفعل — لا تلمسه
+  rearming = true;
+  try {
+    const t = await readTimerFromIDB();
+    if (t && t.running && t.startedAt) {
+      nagState = { startedAt: t.startedAt, accMs: t.accMs || 0, name: t.name || "اللعبة" };
+      scheduleNext();
+    }
+  } catch (e) {} finally { rearming = false; }
 }
 
 function clearNag() {
@@ -109,6 +129,8 @@ self.addEventListener("message", event => {
     scheduleNext();
   } else if (d.type === "timer-stop") {
     clearNag();
+  } else if (d.type === "wake") {
+    rearmFromIDB();   /* الصفحة عادت للمقدّمة — تأكّد أن التذكير حيّ */
   }
 });
 
@@ -147,6 +169,7 @@ function readTimerFromIDB() {
 self.addEventListener("periodicsync", event => {
   if (event.tag !== "gamelib-nag-check") return;
   event.waitUntil((async () => {
+    await rearmFromIDB();   /* أعد تسليح المؤقّت لا التذكير مرة واحدة فقط */
     const t = await readTimerFromIDB();
     if (!t || !t.running || !t.startedAt) return;
     const el = (t.accMs || 0) + (Date.now() - t.startedAt);

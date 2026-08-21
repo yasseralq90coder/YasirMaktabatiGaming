@@ -412,6 +412,11 @@ const relDay = t => { const a=localDay(new Date()), b=localDay(t);
   const d=Math.round((new Date(a)-new Date(b))/86400000);
   return d<7 ? "قبل "+d+" أيام" : d<30 ? "قبل "+Math.floor(d/7)+" أسابيع" : b; };
 const localDay = t => { const d = t instanceof Date ? t : new Date(t); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+/* الشهر المحلي لأي قيمة تاريخ. المخزَّن نوعان: نصّ يوم "YYYY-MM-DD" (dateAdded،
+   تاريخ التختيمة) وطابع ISO بتوقيت UTC (at الجلسة). أخذ slice(0,7) من الاثنين
+   يحسب جلسةَ الساعة 1 ليلًا من أول الشهر للشهر السابق في المناطق الموجبة
+   (الرياض +3)، فتختفي من تحدي الشهر بلا سبب ظاهر. */
+const localMonth = v => { const t = String(v || ""); if (!t) return ""; return (t.length === 10 && t[4] === "-") ? t.slice(0, 7) : localDay(t).slice(0, 7); };
 /* مقارنة وتيرة التختيمة بمعدل HowLongToBeat المخزَّن */
 function paceOf(g, hrs) {
   const ttb = Number(g && g.ttbMain) || Number(g && g.ttbFull) || 0; hrs = Number(hrs) || 0;
@@ -710,6 +715,38 @@ TRACKS.push({
   blurb: "ألعاب إطلاق نار أكملتها",
   metric: g => completedGenre(g, "shooter")
 }, {
+  id: "ra_earned",
+  icon: "🏅",
+  title: "صيّاد الإنجازات",
+  unit: "إنجاز",
+  start: 10,
+  blurb: "إنجازات RetroAchievements حصلت عليها",
+  metric: g => g.filter(raShows).reduce((n, x) => n + raEarnedCount(x), 0)
+}, {
+  id: "ra_points",
+  icon: "⭐",
+  title: "جامع النقاط",
+  unit: "نقطة",
+  start: 50,
+  blurb: "نقاط إنجازات RA (التكرار يُحتسب بنصف قيمته)",
+  metric: g => g.filter(raShows).reduce((n, x) => n + raGamePoints(x), 0)
+}, {
+  id: "ra_master",
+  icon: "💎",
+  title: "المُتقِن",
+  unit: "لعبة",
+  start: 1,
+  blurb: "ألعاب أكملت كل إنجازاتها",
+  metric: g => g.filter(x => raShows(x) && raIsMastered(x)).length
+}, {
+  id: "ra_repeat",
+  icon: "🔁",
+  title: "مُعيد الكرّة",
+  unit: "إعادة",
+  start: 3,
+  blurb: "إنجازات كسبتها أكثر من مرة",
+  metric: g => g.filter(raShows).reduce((n, x) => n + raRepeats(x), 0)
+}, {
   id: "streak",
   icon: "🔥",
   title: "سلسلة الأيام",
@@ -719,6 +756,48 @@ TRACKS.push({
   metric: g => streakOf(g)
 });
 const BADGES = [{
+  id: "ra_first",
+  icon: "🏅",
+  title: "أول إنجاز",
+  desc: "حصلت على أول إنجاز في RetroAchievements",
+  hidden: true,
+  check: g => g.some(x => raShows(x) && raEarnedCount(x) > 0)
+}, {
+  id: "ra_master_first",
+  icon: "💎",
+  title: "إتقان كامل",
+  desc: "أكملت كل إنجازات لعبة واحدة",
+  hidden: true,
+  check: g => g.some(x => raShows(x) && raIsMastered(x))
+}, {
+  id: "ra_master_twice",
+  icon: "♻️",
+  title: "أتقنها مرتين",
+  desc: "أتقنت نفس اللعبة كاملةً مرتين أو أكثر",
+  hidden: true,
+  check: g => g.some(x => raShows(x) && raMasteries(x) >= 2)
+}, {
+  id: "ra_thrice",
+  icon: "🔁",
+  title: "ثلاث مرات",
+  desc: "كسبت نفس الإنجاز 3 مرات",
+  hidden: true,
+  check: g => g.some(x => raShows(x) && raAchList(x).some(a => a.earned && raAchTimes(x, a.id) >= 3))
+}, {
+  id: "ra_hundred",
+  icon: "💯",
+  title: "مئة إنجاز",
+  desc: "100 إنجاز RetroAchievements فأكثر (إجمالي ألعابك)",
+  hidden: true,
+  check: g => g.filter(raShows).reduce((n, x) => n + raEarnedCount(x), 0) >= 100
+}, {
+  id: "ra_hardcore",
+  icon: "🔥",
+  title: "إتقان Hardcore",
+  desc: "أتقنت لعبة كاملةً في وضع Hardcore",
+  hidden: true,
+  check: g => g.some(x => raShows(x) && raTotalCount(x) > 0 && Number(x.ra.numAwardedHardcore || 0) >= raTotalCount(x))
+}, {
   id: "sameday",
   icon: "⚡",
   title: "برق المكتبة",
@@ -1209,11 +1288,12 @@ function realPlayHours(g) {
 }
 function baseXp(games) {
   let xp = 0;
-  for (const g of games) {
+  for (const g of (games || [])) {
     // نقاط وجود اللعبة حسب النوع: محاكي/NSO = 1، رقمية = 5، ديسك = 10
     // غلاف المجموعة منتَج لا لعبة → لا نقاط اقتناء له (ألعابه الداخلية تُحتسب)
     if (!isShell(g)) xp += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
     xp += XP_PER_HOUR * Math.max(0, realPlayHours(g)); // نقاط ساعات اللعب الحقيقية
+    xp += raGamePoints(g); // نقاط إنجازات RA (0 لغير المرتبطة) — ⚠️ مكرَّر في شاشة «مصادر نقاط الخبرة»
     const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
     runs.forEach((r, i) => {
       const base = i === 0 ? 100 : 150; // أساس التختيمة
@@ -1401,7 +1481,7 @@ const gameRankPoints = games => gameRanksAll(games).reduce((s, x) => s + x.info.
 // نقاط الخبرة الكلية = الأساس + نقاط رتب الألعاب (تُحسب في المستوى)
 const totalXp = games => Math.round(baseXp(games) + gameRankPoints(games) + challengeXp(games) + streakXp(games));
 /* ---------- سلسلة الأيام والمجموعات وتحدي الشهر ---------- */
-const realDayHours = games => { const m = {}; (games||[]).forEach(g => (g.sessions||[]).forEach(s => { if (s.src !== "backfill") { const k = localDay(s.at); m[k] = (m[k]||0) + s.ms/3600000; } })); return m; };
+const realDayHours = games => { const m = {}; (games||[]).forEach(g => (g.sessions||[]).forEach(s => { if (s && s.src !== "backfill" && s.at) { const k = localDay(s.at); m[k] = (m[k]||0) + s.ms/3600000; } })); return m; };
 const curStreak = games => { const m = realDayHours(games); const t = new Date();
   let d = new Date(t), n = 0;
   if (!m[localDay(d)]) { d.setDate(d.getDate()-1); if (!m[localDay(d)]) return 0; }
@@ -1421,7 +1501,7 @@ const CHALLS = [
 ];
 /* ملخص الشهر */
 function monthStats(games, ym){
-  const inM=v=>String(v||"").slice(0,7)===ym;
+  const inM=v=>localMonth(v)===ym;
   let hours=0, sessions=0; const per={}; const byDay={};
   games.forEach(g=>(g.sessions||[]).forEach(s=>{ if(inM(s.at)&&s.src!=="backfill"){ const h=s.ms/3600000; hours+=h; sessions++; per[g.id]=(per[g.id]||0)+h; const d=localDay(s.at); byDay[d]=(byDay[d]||0)+h; } }));
   const topId=Object.keys(per).sort((a,b)=>per[b]-per[a])[0];
@@ -1450,8 +1530,8 @@ function predictFinish(game, all){
   return "🔮 توقع الختم: خلال ~"+days+" "+(days>10?"يومًا":"أيام")+" بمعدلك الحالي (~"+Math.round(rem)+" س متبقية تقريبًا)";
 }
 function monthChallenge(games) {
-  const now = new Date(), M = now.toISOString().slice(0,7);
-  const inM = v => String(v||"").slice(0,7) === M;
+  const now = new Date(), M = localDay(now).slice(0,7);
+  const inM = v => localMonth(v) === M;
   const c = CHALLS[now.getMonth() % CHALLS.length];
   return { title: c.t, done: c.chk(games||[], inM), month: AR_MONTHS[now.getMonth()] };
 }
@@ -1485,7 +1565,11 @@ const GAME_RANKS = [[0, "مُستكشف", "🎮"], [50, "مُقاتل", "🕹️
 function gameScore(games) {
   let h = 0, c = 0;
   for (const g of (games || [])) {
-    h += Math.max(0, Number(g.hours) || 0);
+    /* ساعات حقيقية فقط (realPlayHours) لا حقل hours الخام: الأخير يضمّ الوقت
+       التعويضي backfill الذي يستثنيه XP وكل الإحصائيات، فكانت رتبة اللعب
+       ترتفع بوقت لا يظهر في أي مكان آخر — لعبة بساعة مسجّلة و39 مكتوبة
+       يدويًا كانت تعطي 40 نقطة لعب و10 نقاط خبرة. */
+    h += Math.max(0, realPlayHours(g));
     c += [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])].length;
   }
   return Math.round(h + 20 * c); // ساعة = 1 نقطة لعب، تختيمة = 20
@@ -1824,23 +1908,34 @@ function raPlatformOf(consoleName) {
   return "أخرى";
 }
 const raBadgeUrl = b => b ? "https://media.retroachievements.org/Badge/" + b + ".png" : "";
-/* كل ألعاب المستخدم التي له فيها تقدّم (مقسّمة صفحات، 500 بالصفحة) */
-async function raUserGames(user, key) {
+/* بحث عن لعبة في قائمة منصّة واحدة — للربط اليدوي. يرجع أفضل المرشّحين مرتّبين:
+   التطابق التام أولًا، ثم ما يبدأ بالنص، ثم ما يحتويه. الألعاب لا تدخل مكتبتك
+   إلا باختيارك من هذه القائمة — لا استيراد تلقائي إطلاقًا. */
+function raSearchGames(list, query, limit) {
+  const q = lrNorm(query || "");
+  if (!q) return [];
   const out = [];
-  for (let off = 0; off < 5000; off += 500) {
-    const j = await raFetch("API_GetUserCompletionProgress.php?u=" + encodeURIComponent(user) + "&c=500&o=" + off, user, key);
-    const rows = (j && Array.isArray(j.Results)) ? j.Results : [];
-    out.push(...rows);
-    const total = j && Number(j.Total) || 0;
-    if (rows.length < 500 || out.length >= total) break;
+  for (const g of list || []) {
+    const title = g.Title || g.title || "";
+    const t = lrNorm(title);
+    if (!t) continue;
+    let rank = -1;
+    if (t === q) rank = 0;
+    else if (t.startsWith(q)) rank = 1;
+    else if (t.includes(q)) rank = 2;
+    else if (q.includes(t) && t.length >= 3) rank = 3;
+    if (rank < 0) continue;
+    out.push({
+      id: g.ID != null ? g.ID : g.id,
+      title: title,
+      consoleName: g.ConsoleName || g.consoleName || "",
+      points: Number(g.Points || g.points) || 0,
+      numAchievements: Number(g.NumAchievements || g.numAchievements) || 0,
+      rank: rank
+    });
   }
-  return out;
-}
-/* آخر ما لعبه المستخدم (طلب واحد، حتى 50) — نستخدمه للمزامنة التلقائية الخفيفة:
-   يعطي NumAchieved و LastPlayed فنعرف ما تغيّر بلا جلب تفاصيل كل لعبة. */
-async function raRecentGames(user, key) {
-  const j = await raFetch("API_GetUserRecentlyPlayedGames.php?u=" + encodeURIComponent(user) + "&c=50", user, key);
-  return Array.isArray(j) ? j : [];
+  out.sort((a, b) => a.rank - b.rank || b.numAchievements - a.numAchievements || a.title.localeCompare(b.title));
+  return out.slice(0, limit || 25);
 }
 /* تفاصيل لعبة + تقدّم المستخدم: وقت اللعب بالدقائق وقائمة الإنجازات كاملة */
 async function raGameProgress(gameId, user, key) {
@@ -1876,15 +1971,16 @@ async function raGameProgress(gameId, user, key) {
     syncedAt: nowISO()
   };
 }
+/* ⚠️ الاثنان أدناه للبيانات القديمة فقط — لا يُكتَبان بعد اليوم.
+   كان RA يستورد ألعابًا وأوقات لعب؛ أُلغي ذلك بالكامل (الإضافة يدوية والعدّاد يدوي).
+   نُبقي القيمتين لأن `raPurgeImported` يتعرّف بهما على ما استورده الإصدار القديم. */
 const RA_IMPORT_NOTE = "مستوردة من RetroAchievements";
-/* جلسات RA وقت لعب حقيقي بتواريخ حقيقية — ليست "backfill" التعويضية المستثناة من
-   كل الإحصائيات وXP. تمييزها بـ"ra" يُدخلها تلقائيًا في كل فحوص `src !== "backfill"`. */
 const RA_SESSION_SRC = "ra";
-/* الجلسة الواحدة عندنا مجموع يوم كامل من RA لا جلسة جلوس واحدة، فتُستثنى من
-   أوسمة "جلسة واحدة تجاوزت س ساعات" حتى لا تُفتح بغير وجه حق. */
+/* جلسة جلوس حقيقية: ليست وقتًا تعويضيًا مُصطنعًا ولا مجموع يوم مستورد من RA.
+   تُستخدم للأوسمة التي تعتمد طول جلسة واحدة. */
 const isSitting = s => s && s.src !== "backfill" && s.src !== RA_SESSION_SRC;
-/* RA يفهرس نُسخًا فرعية لنفس اللعبة: "[Subset - Bonus]" و"~Hack~" و"~Homebrew~"…
-   بدون تجريدها تُستورَد كل نسخة كلعبة مستقلة فتظهر مكرّرة في المكتبة. */
+/* RA يفهرس نُسخًا فرعية لنفس اللعبة: "[Subset - Bonus]" و"~Hack~" و"~Homebrew~".
+   نجرّدها عند عرض اسم اللعبة القادم من RA حتى لا يظهر الاسم مشوَّشًا. */
 function raBaseTitle(t) {
   return String(t || "")
     .replace(/\[[^\]]*\]/g, " ")   // [Subset - Bonus] وما شابه
@@ -1892,28 +1988,99 @@ function raBaseTitle(t) {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
-const raDedupKey = (title, platform) => lrNorm(raBaseTitle(title)) + "|" + platform;
-/* يبني جلسات مؤرَّخة حقيقية من تواريخ الإنجازات بدل جلسة واحدة بتاريخ اليوم:
-   كل يوم حصلت فيه على إنجاز = جلسة، ووقت اللعب يُوزَّع بينها بوزن عدد إنجازات كل يوم. */
-function raSessionsFromAchievements(achievements, totalHours) {
-  const byDay = {};
-  for (const a of achievements || []) {
-    if (!a || !a.earned || !a.date) continue;
-    const d = String(a.date).slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
-    byDay[d] = (byDay[d] || 0) + 1;
+
+/* ---------- سجل تكرار إنجازات RA (نظام داخلي بالكامل) ----------
+   RA لا يحفظ تاريخ تكرار: لكل إنجاز `DateEarned` واحد فقط، ويُستبدَل بصمت إن
+   أعدت ضبط تقدّمك وحصلت عليه مرة ثانية. فالمصدر الوحيد الممكن لعدّ التكرار هو
+   المقارنة المحلية بين كل مزامنة والتي قبلها — لذلك نحفظ `g.raHist` عندنا.
+
+   قاعدة العدّ: الإنجاز محصَّل الآن ويحمل تاريخًا لم نسجّله من قبل ⇒ مرة جديدة.
+   حدّها المعروف: لو تكرّر إنجازان في نفس اليوم لا يمكن تمييزهما — مقبول.
+   السجل يبدأ من أول مزامنة بعد هذا الإصدار؛ ما قبله يُبذَّر كمرة واحدة. */
+const RA_HIST_V = 1;
+const raEmptyHist = () => ({ v: RA_HIST_V, ach: {}, masteries: [], resets: [], seededAt: "" });
+function raMergeHistory(prevHist, prevRa, nextRa) {
+  const base = prevHist && prevHist.ach ? prevHist : raEmptyHist();
+  const h = {
+    v: RA_HIST_V,
+    ach: { ...base.ach },
+    masteries: [...(base.masteries || [])],
+    resets: [...(base.resets || [])],
+    seededAt: base.seededAt || nowISO()
+  };
+  const seeding = !base.seededAt;
+  let newEarns = 0, reEarns = 0;
+  for (const a of nextRa.achievements || []) {
+    if (!a || !a.earned) continue;
+    const id = String(a.id);
+    const day = String(a.date || "").slice(0, 10);
+    const prev = h.ach[id];
+    const dates = prev && Array.isArray(prev.dates) ? prev.dates : [];
+    const times = prev ? Number(prev.times) || 0 : 0;
+    /* أول مرة نراه محصَّلًا، أو بتاريخ جديد لم نعدّه ⇒ مرة إضافية */
+    if (times > 0 && (!day || dates.includes(day))) continue;
+    h.ach[id] = {
+      times: times + 1,
+      hcTimes: (prev ? Number(prev.hcTimes) || 0 : 0) + (a.hardcore ? 1 : 0),
+      dates: day && !dates.includes(day) ? [...dates, day].sort() : dates,
+      title: a.title || (prev && prev.title) || ""
+    };
+    if (times > 0) reEarns++; else newEarns++;
   }
-  const days = Object.keys(byDay).sort();
-  if (!days.length) return { sessions: [], first: "", last: "" };
-  const totalW = days.reduce((s, d) => s + byDay[d], 0);
-  const totalMs = Math.round(Math.max(0, Number(totalHours) || 0) * 3600000);
-  const sessions = days.map(d => ({
-    at: new Date(d + "T18:00:00").toISOString(),
-    ms: Math.max(60000, Math.round(totalMs * (byDay[d] / totalW))),
-    src: RA_SESSION_SRC,
-    note: RA_IMPORT_NOTE
-  }));
-  return { sessions, first: days[0], last: days[days.length - 1] };
+  const prevAw = Number((prevRa || {}).numAwarded) || 0;
+  const nextAw = Number(nextRa.numAwarded) || 0;
+  const prevTot = Number((prevRa || {}).numAchievements) || 0;
+  const nextTot = Number(nextRa.numAchievements) || (nextRa.achievements || []).length;
+  /* انخفاض عدد المحصَّل = أعدتَ ضبط تقدّمك في RA */
+  if (prevRa && nextAw < prevAw) h.resets.push({ at: nowISO(), from: prevAw, to: nextAw });
+  const isMastered = nextTot > 0 && nextAw >= nextTot;
+  const wasMastered = prevTot > 0 && prevAw >= prevTot;
+  /* إتقان جديد: إما وصلتَ 100٪ ولم تكن كذلك، أو كنتَ متقنًا وأعدتَ كسب إنجازات
+     بتواريخ جديدة (أعدت الضبط وأتقنتها ثانيةً بين مزامنتين فلم نر الانخفاض). */
+  if (isMastered && (!wasMastered || reEarns > 0)) {
+    h.masteries.push({ at: nowISO(), awarded: nextAw, total: nextTot, hardcore: Number(nextRa.numAwardedHardcore) || 0 });
+  }
+  return { hist: h, newEarns: newEarns, reEarns: reEarns, seeded: seeding };
+}
+/* مشتقّات السجل — تُستخدم في الواجهة والمسارات والأوسمة وXP */
+const raAchList = g => ((g && g.ra && g.ra.achievements) || []);
+const raAchRec = (g, id) => (((g && g.raHist && g.raHist.ach) || {})[String(id)] || null);
+const raAchTimes = (g, id) => { const r = raAchRec(g, id); return r ? Math.max(1, Number(r.times) || 1) : 1; };
+const raMasteries = g => ((g && g.raHist && g.raHist.masteries) || []).length;
+/* عدد مرات إعادة كسب الإنجازات (ما زاد عن المرة الأولى) في لعبة */
+function raRepeats(g) {
+  const ach = (g && g.raHist && g.raHist.ach) || {};
+  let n = 0;
+  for (const k of Object.keys(ach)) n += Math.max(0, (Number(ach[k].times) || 1) - 1);
+  return n;
+}
+const raEarnedCount = g => raAchList(g).filter(a => a.earned).length;
+const raTotalCount = g => Number((g && g.ra && g.ra.numAchievements) || 0) || raAchList(g).length;
+const raIsMastered = g => raTotalCount(g) > 0 && raEarnedCount(g) >= raTotalCount(g);
+/* لعبة تُحتسب إنجازاتها: مرتبطة يدويًا + على محاكي. شرط المستخدم الصريح:
+   اللعبة على جهاز أصلي لا تعرض إنجازات ولا تساهم فيها، ولو بقي فيها g.ra. */
+const raShows = g => !!(g && g.hardware === "emulator" && g.raGameId && g.ra);
+/* نقاط RA للعبة: نقاط كل إنجاز محصَّل + نصف نقاطه عن كل إعادة كسب.
+   نصف لأن التكرار إنجاز حقيقي لكنه أسهل من الأول — يكافئ بلا تضخيم.
+   البوابة raShows هنا لا عند المستدعي: baseXp يمرّ على كل الألعاب، ونسيان
+   الفلترة هناك كان سيمنح نقاطًا للعبة على جهاز أصلي. */
+function raGamePoints(g) {
+  if (!raShows(g)) return 0;
+  let p = 0;
+  for (const a of raAchList(g)) {
+    if (!a || !a.earned) continue;
+    const pts = Number(a.points) || 0;
+    p += pts + pts * 0.5 * (raAchTimes(g, a.id) - 1);
+  }
+  return Math.round(p);
+}
+/* تمييز عربي صحيح: 1 إنجاز • 2 إنجازين • 3-10 إنجازات • 11+ إنجازًا */
+function arCount(n, one, two, few, many) {
+  const v = Number(n) || 0;
+  if (v === 1) return one;
+  if (v === 2) return two;
+  if (v >= 3 && v <= 10) return v + " " + few;
+  return v + " " + many;
 }
 const raGameUrl = id => "https://retroachievements.org/game/" + id;
 const raAchUrl = id => "https://retroachievements.org/achievement/" + id;
@@ -1944,37 +2111,6 @@ function compressFromUrl(url, maxW = COVER_W, quality = COVER_Q) {
   });
 }
 /* طلب رابط غلاف رسمي للعبة عبر بحث الويب ثم تنزيله وضغطه — تحاول تلقائيًا، وتفشل بصمت لو تعذّر (CORS أو لا نتيجة) */
-async function fetchNSOCover(name, sysLabel) {
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 500,
-        messages: [{
-          role: "user",
-          content: 'ابحث عن رابط مباشر (ينتهي بـ .jpg أو .png) لصورة الغلاف الرسمي للعبة "' + name + '" (نظام ' + sysLabel + '). أعد فقط JSON بدون أي نص إضافي: {"coverUrl":"الرابط المباشر للصورة أو فارغ إن لم تجد"}'
-        }],
-        tools: [{
-          type: "web_search_20250305",
-          name: "web_search"
-        }]
-      })
-    });
-    const data = await res.json();
-    const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-    const clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-    const m = clean.match(/\{[\s\S]*\}/);
-    const obj = JSON.parse(m ? m[0] : clean);
-    if (!obj.coverUrl) return null;
-    return await compressFromUrl(obj.coverUrl);
-  } catch {
-    return null;
-  }
-}
 
 /* ---------- التخزين الدائم (تسلسل JSON موحّد) ---------- */
 const KEY_GAMES = "gamelib:games";
@@ -1985,7 +2121,6 @@ const IMG_VER = 2;
 const KEY_RAWG = "gamelib:rawgkey";
 const KEY_RA_USER = "gamelib:rauser";
 const KEY_RA_KEY = "gamelib:rakey";
-const KEY_RA_AUTO = "gamelib:raautoat";
 const KEY_TIMER = "gamelib:timer";
 const KEY_NSOSUB = "gamelib:nsosub";
 const KEY_THEME = "gamelib:theme";
@@ -2260,6 +2395,14 @@ function registerPWA() {
 }
 
 // إبلاغ الـSW بحالة العدّاد ليجدول التنبيهات في الخلفية
+/* أيقظ الـSW وأمُره بإعادة تسليح تذكير العدّاد من IndexedDB */
+function swWake() {
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller)
+      navigator.serviceWorker.controller.postMessage({ type: "wake" });
+  } catch (e) {}
+}
+
 function swTimerSync(timer) {
   try {
     if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
@@ -2387,6 +2530,47 @@ function FilterChip({
       borderColor: color ? color + "66" : "#2c2f44"
     }
   }, children);
+}
+
+/* ---------- نافذة الربط اليدوي بـRetroAchievements ----------
+   المكان الوحيد الذي يُربَط منه `raGameId`. المستخدم يختار اللعبة بنفسه من قائمة
+   منصّتها — لا مطابقة تلقائية ولا استيراد. البحث محلي في القائمة المخزَّنة مؤقتًا. */
+function RaLinkModal({ pick, onSearch, onConfirm, onClose }) {
+  if (!pick) return null;
+  const busy = pick.state === "loading" || pick.state === "linking";
+  return /*#__PURE__*/React.createElement("div", { className: "modal-backdrop", onClick: busy ? null : onClose },
+    /*#__PURE__*/React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
+      /*#__PURE__*/React.createElement("div", { className: "modal-head" },
+        /*#__PURE__*/React.createElement("h2", null, "🔗 اربط بـRetroAchievements"),
+        /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onClose, disabled: busy }, "✕")),
+      /*#__PURE__*/React.createElement("div", { className: "modal-body" },
+        /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
+          "تربط ", /*#__PURE__*/React.createElement("b", null, pick.name), " (", pick.platform, ") بلعبتها في RetroAchievements. ",
+          "الربط يجلب ", /*#__PURE__*/React.createElement("b", null, "الإنجازات فقط"), " — لا ساعات ولا ألعاب جديدة."),
+        pick.state === "nocreds" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" },
+          "أضف اسم المستخدم ومفتاح API من الإعدادات أولًا"),
+        pick.state === "unsupported" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
+          "🌍 منصّة «", pick.platform, "» غير مدعومة في RetroAchievements"),
+        pick.state === "loading" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "⏳ جاري جلب ألعاب المنصّة…"),
+        pick.state === "linking" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "⏳ جاري جلب إنجازاتك…"),
+        pick.err && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, pick.err),
+        (pick.state === "ready" || pick.state === "linking") && /*#__PURE__*/React.createElement(React.Fragment, null,
+          /*#__PURE__*/React.createElement("label", { className: "field" },
+            /*#__PURE__*/React.createElement("span", null, "ابحث باسم اللعبة الإنجليزي"),
+            /*#__PURE__*/React.createElement("input", {
+              value: pick.q, onChange: e => onSearch(e.target.value), disabled: busy,
+              placeholder: "Sonic the Hedgehog…", style: { direction: "ltr", textAlign: "left" }
+            })),
+          pick.results.length === 0
+            ? /*#__PURE__*/React.createElement("div", { className: "runs-empty" }, "ما فيه نتيجة — جرّب الاسم الإنجليزي الأصلي")
+            : /*#__PURE__*/React.createElement("div", { className: "ra-pick-list" }, pick.results.map(r =>
+                /*#__PURE__*/React.createElement("button", {
+                  key: r.id, className: "ra-pick-row", disabled: busy, onClick: () => onConfirm(r.id)
+                },
+                /*#__PURE__*/React.createElement("div", { className: "ra-pick-i" },
+                  /*#__PURE__*/React.createElement("b", null, r.title),
+                  /*#__PURE__*/React.createElement("small", null, r.consoleName, r.numAchievements ? " • " + r.numAchievements + " إنجاز" : "")),
+                /*#__PURE__*/React.createElement("span", { className: "ra-pick-go" }, "اربط ←"))))))));
 }
 
 /* ---------- بطاقة وصفحة Nintendo Switch Online ---------- */
@@ -2715,6 +2899,8 @@ function GameDetail({
   onLogScoreAttempt,
   onRemoveScoreAttempt,
   onRaRefresh,
+  onRaLink,
+  onRaUnlink,
   raBusy,
   onUpdateNote,
   onSetRunMeta,
@@ -2790,9 +2976,10 @@ function GameDetail({
   const [raState, setRaState] = useState("idle"); // idle | loading | done | unsupported | nomatch | nolb | error
   const [raResult, setRaResult] = useState(null);
   const [achTab, setAchTab] = useState("earned");
-  /* لعبة مرتبطة بـRA = وقتها وإنجازاتها تُزامَن تلقائيًا، فالعدّاد اليدوي لا معنى له.
-     لاحظ: ألعاب المحاكي غير المرتبطة بـRA تحتفظ بالعدّاد لأن لا مصدر تلقائي لوقتها. */
-  const raLinked = !!(game.raGameId && game.ra);
+  /* الربط بـRA للإنجازات فقط: لا يجلب وقت لعب ولا يخفي العدّاد. كل الساعات
+     في هذا التطبيق تُسجَّل يدويًا بالعدّاد أو بالإدخال اليدوي — بلا استثناء. */
+  const raLinked = raShows(game);
+  const raCanLink = game.hardware === "emulator";
   const fetchWorldRecord = async () => {
     if (!raUser || !raKey) { setMsg("أضف اسم مستخدم ومفتاح RetroAchievements من الإعدادات أولًا"); return; }
     setRaState("loading");
@@ -3044,20 +3231,7 @@ function GameDetail({
       color: "#a78bfa"
     }
   }, "العدّاد والتختيم سيُسجَّلان على: ", selPart >= 1000 && goals[selPart - 1000] ? "🎯 " + goals[selPart - 1000].name : selPart >= 0 && parts[selPart] ? "🧩 " + parts[selPart].name : "اللعبة كاملة"),
-  /* ===== لعبة مرتبطة بـRetroAchievements: الوقت والإنجازات تُزامَن تلقائيًا، فلا عدّاد ===== */
-  raLinked ? /*#__PURE__*/React.createElement("div", { className: "timer-section ra-auto-box" },
-    /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "🔄 مزامنة تلقائية من RetroAchievements"),
-    /*#__PURE__*/React.createElement("div", { className: "ra-auto-t" },
-      /*#__PURE__*/React.createElement("b", null, fmtHours(game.hours || 0)),
-      /*#__PURE__*/React.createElement("span", null, "وقت اللعب يُحدَّث تلقائيًا — لا حاجة للعدّاد")),
-    /*#__PURE__*/React.createElement("div", { className: "ra-auto-s" },
-      "آخر مزامنة: ", (game.ra && game.ra.syncedAt) ? relDay(game.ra.syncedAt) : "—",
-      " • يتحدّث عند فتح التطبيق"),
-    /*#__PURE__*/React.createElement("button", {
-      className: "btn ghost", style: { width: "100%", marginTop: 8 },
-      onClick: onRaRefresh, disabled: raBusy
-    }, raBusy ? "⏳ جاري المزامنة…" : "🔄 مزامنة الآن"))
-  : /* ===== عدّاد اللعب ===== */
+  /* ===== عدّاد اللعب — يظهر لكل لعبة بلا استثناء (الوقت يدوي دائمًا) ===== */
   /*#__PURE__*/React.createElement("div", {
     className: "timer-section"
   }, /*#__PURE__*/React.createElement("div", {
@@ -3430,23 +3604,53 @@ function GameDetail({
     raState === "nomatch" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 ما لقينا مطابقة لاسم اللعبة — جرّب تعديل الاسم"),
     raState === "nolb" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 اللعبة موجودة لكن بلا لوحة صدارة نتائج"),
     raState === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, "🌍 تعذّر الاتصال — تحقق من المفتاح")),
-  /* ===== إنجازات RetroAchievements — لألعاب المحاكي فقط ===== */
-  game.hardware === "emulator" && game.ra && (() => {
+  /* ===== ربط يدوي بـRetroAchievements — لألعاب المحاكي غير المرتبطة ===== */
+  raCanLink && !raLinked && /*#__PURE__*/React.createElement("div", { className: "runs-box ra-box" },
+    /*#__PURE__*/React.createElement("div", { className: "runs-head" },
+      /*#__PURE__*/React.createElement("span", null, "🏅 إنجازات RetroAchievements")),
+    /*#__PURE__*/React.createElement("p", { className: "bk-desc", style: { margin: "6px 0 10px" } },
+      "اربط هذه اللعبة بلعبتها في RetroAchievements لتشوف إنجازاتك: اللي حصلت عليها واللي باقية. ",
+      "الربط ", /*#__PURE__*/React.createElement("b", null, "لا يغيّر ساعاتك ولا يضيف ألعابًا لمكتبتك"), " — الإنجازات فقط."),
+    /*#__PURE__*/React.createElement("button", {
+      className: "btn auto", style: { width: "100%" }, onClick: () => onRaLink(game)
+    }, "🔗 اربط بلعبة في RetroAchievements")),
+  /* ===== إنجازات RetroAchievements — لألعاب المحاكي المرتبطة فقط ===== */
+  raLinked && (() => {
     const ra = game.ra;
     const list = ra.achievements || [];
     const earned = list.filter(a => a.earned);
     const locked = list.filter(a => !a.earned);
+    const repeated = earned.filter(a => raAchTimes(game, a.id) > 1);
     const pts_ = earned.reduce((s, a) => s + (Number(a.points) || 0), 0);
     const totPts = list.reduce((s, a) => s + (Number(a.points) || 0), 0);
-    const pct = ra.numAchievements ? Math.round(earned.length / ra.numAchievements * 100) : 0;
-    const shown = achTab === "earned" ? earned : locked;
+    const withRepeat = raGamePoints(game);
+    const tot = raTotalCount(game);
+    const pct = tot ? Math.round(earned.length / tot * 100) : 0;
+    const masteries = raMasteries(game);
+    const repeats = raRepeats(game);
+    const busy = raBusy;
+    const shown = achTab === "locked" ? locked : achTab === "repeat" ? repeated : earned;
+    /* شارة عدد المرات: RA لا يحفظ التكرار، فالعدّ من سجلّنا المحلي `raHist` */
+    const timesChip = a => {
+      const n = raAchTimes(game, a.id);
+      if (n <= 1) return null;
+      return /*#__PURE__*/React.createElement("span", { className: "ra-times", title: "حصلت عليه " + n + " مرات" }, "🔁 ×", n);
+    };
     return /*#__PURE__*/React.createElement("div", { className: "runs-box ra-box" },
       /*#__PURE__*/React.createElement("div", { className: "runs-head" },
         /*#__PURE__*/React.createElement("span", null, "🏅 إنجازات RetroAchievements"),
-        /*#__PURE__*/React.createElement("b", null, earned.length, " / ", ra.numAchievements, " • ", pts_, "/", totPts, " نقطة")),
+        /*#__PURE__*/React.createElement("b", null, earned.length, " / ", tot, " • ", pts_, "/", totPts, " نقطة")),
       /*#__PURE__*/React.createElement("div", { className: "ra-prog" },
         /*#__PURE__*/React.createElement("div", { className: "ra-prog-fill", style: { width: pct + "%" } }),
         /*#__PURE__*/React.createElement("span", { className: "ra-prog-t" }, pct, "٪")),
+      /* سطر الإتقان والتكرار — النظام الداخلي، لا يأتي من RA */
+      (masteries > 0 || repeats > 0) && /*#__PURE__*/React.createElement("div", { className: "ra-repeat-row" },
+        masteries > 0 && /*#__PURE__*/React.createElement("span", { className: "ra-chip mast" },
+          "🏆 أتقنتها ", arCount(masteries, "مرة", "مرتين", "مرات", "مرة")),
+        repeats > 0 && /*#__PURE__*/React.createElement("span", { className: "ra-chip rep" },
+          "🔁 أعدت كسب ", arCount(repeats, "إنجازًا واحدًا", "إنجازين", "إنجازات", "إنجازًا")),
+        withRepeat > pts_ && /*#__PURE__*/React.createElement("span", { className: "ra-chip pts" },
+          "⭐ ", withRepeat, " نقطة مع التكرار")),
       ra.numAwardedHardcore > 0 && /*#__PURE__*/React.createElement("div", { className: "ra-hc" }, "🔥 وضع Hardcore: ", ra.numAwardedHardcore, " إنجاز"),
       /*#__PURE__*/React.createElement("div", { className: "ra-tabs" },
         /*#__PURE__*/React.createElement("button", {
@@ -3454,30 +3658,55 @@ function GameDetail({
         }, "✅ حصلت عليها (", earned.length, ")"),
         /*#__PURE__*/React.createElement("button", {
           className: "ra-tab" + (achTab === "locked" ? " on" : ""), onClick: () => setAchTab("locked")
-        }, "🔒 متبقية (", locked.length, ")")),
+        }, "🔒 متبقية (", locked.length, ")"),
+        repeated.length > 0 && /*#__PURE__*/React.createElement("button", {
+          className: "ra-tab" + (achTab === "repeat" ? " on" : ""), onClick: () => setAchTab("repeat")
+        }, "🔁 مكرّرة (", repeated.length, ")")),
       shown.length === 0
-        ? /*#__PURE__*/React.createElement("div", { className: "runs-empty" }, achTab === "earned" ? "لا إنجازات بعد — العب واسحب المزامنة" : "🎉 كملّتها كلها!")
-        : /*#__PURE__*/React.createElement("div", { className: "ra-list" }, shown.map(a => /*#__PURE__*/React.createElement("div", {
-            key: a.id, className: "ra-item" + (a.earned ? " got" : "")
-          },
-          a.badge
-            ? /*#__PURE__*/React.createElement("img", { className: "ra-badge", src: raBadgeUrl(a.badge), alt: "", loading: "lazy" })
-            : /*#__PURE__*/React.createElement("span", { className: "ra-badge ra-badge-ph" }, a.earned ? "🏅" : "🔒"),
-          /*#__PURE__*/React.createElement("div", { className: "ra-i" },
-            /*#__PURE__*/React.createElement("b", null, a.title, a.hardcore && /*#__PURE__*/React.createElement("span", { title: "Hardcore" }, " 🔥")),
-            /*#__PURE__*/React.createElement("small", null, a.desc),
-            a.earned
-              ? /*#__PURE__*/React.createElement("small", { className: "ra-date" }, "✅ ", String(a.date || "").slice(0, 10))
-              : /*#__PURE__*/React.createElement("a", {
-                  className: "ra-guide", href: ra.guideUrl || raAchUrl(a.id),
-                  target: "_blank", rel: "noopener noreferrer"
-                }, "📖 دليل الحصول عليه")),
-          /*#__PURE__*/React.createElement("span", { className: "ra-pts" }, a.points)))),
+        ? /*#__PURE__*/React.createElement("div", { className: "runs-empty" },
+            achTab === "earned" ? "لا إنجازات بعد — العب ثم اضغط «حدّث الإنجازات»"
+              : achTab === "repeat" ? "ما أعدت كسب أي إنجاز بعد"
+              : "🎉 كملّتها كلها!")
+        : /*#__PURE__*/React.createElement("div", { className: "ra-list" }, shown.map(a => {
+            const rec = raAchRec(game, a.id);
+            const dates = (rec && rec.dates) || [];
+            return /*#__PURE__*/React.createElement("div", {
+              key: a.id, className: "ra-item" + (a.earned ? " got" : "")
+            },
+            a.badge
+              ? /*#__PURE__*/React.createElement("img", { className: "ra-badge", src: raBadgeUrl(a.badge), alt: "", loading: "lazy" })
+              : /*#__PURE__*/React.createElement("span", { className: "ra-badge ra-badge-ph" }, a.earned ? "🏅" : "🔒"),
+            /*#__PURE__*/React.createElement("div", { className: "ra-i" },
+              /*#__PURE__*/React.createElement("b", null, a.title,
+                a.hardcore && /*#__PURE__*/React.createElement("span", { title: "Hardcore" }, " 🔥"),
+                timesChip(a)),
+              /*#__PURE__*/React.createElement("small", null, a.desc),
+              a.earned
+                ? /*#__PURE__*/React.createElement("small", { className: "ra-date" },
+                    "✅ ", dates.length > 1 ? dates.join(" • ") : (dates[0] || String(a.date || "").slice(0, 10)))
+                : /*#__PURE__*/React.createElement("a", {
+                    className: "ra-guide", href: ra.guideUrl || raAchUrl(a.id),
+                    target: "_blank", rel: "noopener noreferrer"
+                  }, "📖 دليل الحصول عليه")),
+            /*#__PURE__*/React.createElement("span", { className: "ra-pts" }, a.points));
+          })),
+      /*#__PURE__*/React.createElement("button", {
+        className: "btn auto", style: { width: "100%", marginTop: 8 },
+        onClick: () => onRaRefresh(game.id), disabled: busy
+      }, busy ? "⏳ جاري التحديث…" : "🔄 حدّث الإنجازات"),
       /*#__PURE__*/React.createElement("a", {
-        className: "btn ghost", style: { width: "100%", marginTop: 8, textAlign: "center", textDecoration: "none", display: "block" },
+        className: "btn ghost", style: { width: "100%", marginTop: 6, textAlign: "center", textDecoration: "none", display: "block" },
         href: raGameUrl(ra.gameId), target: "_blank", rel: "noopener noreferrer"
       }, "🌐 صفحة اللعبة في RetroAchievements"),
-      ra.syncedAt && /*#__PURE__*/React.createElement("div", { className: "ra-sync" }, "آخر مزامنة: ", relDay(ra.syncedAt)));
+      /*#__PURE__*/React.createElement("div", { className: "ra-link-row" },
+        /*#__PURE__*/React.createElement("button", {
+          className: "btn ghost", onClick: () => onRaLink(game)
+        }, "🔗 غيّر اللعبة المرتبطة"),
+        /*#__PURE__*/React.createElement("button", {
+          className: "btn ghost danger",
+          onClick: () => { if (window.confirm("فك ارتباط «" + game.name + "» بـRetroAchievements؟ سجلّ التكرار عندك يبقى محفوظًا.")) onRaUnlink(game.id); }
+        }, "✂️ فُك الارتباط")),
+      ra.syncedAt && /*#__PURE__*/React.createElement("div", { className: "ra-sync" }, "آخر تحديث: ", relDay(ra.syncedAt)));
   })(),
   /*#__PURE__*/React.createElement("div", {
     className: "runs-box"
@@ -4949,7 +5178,7 @@ function AchievementsView({
     className: "stats"
   }, /*#__PURE__*/React.createElement("div", {
     className: "atabs"
-  }, [["overview", "📊 نظرة عامة"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["granks", "🎖️ رتب ألعابي"], ["ranks", "🏆 الرتب"]].concat(games.some(g => g.hardware === "emulator" && g.ra) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+  }, [["overview", "📊 نظرة عامة"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["granks", "🎖️ رتب ألعابي"], ["ranks", "🏆 الرتب"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
     key: k,
     className: "atab" + (tab === k ? " on" : ""),
     onClick: () => setTab(k)
@@ -5453,7 +5682,7 @@ function AchievementsView({
       /*#__PURE__*/React.createElement("b", null, b.hidden && !b.done ? "وسام خفي" : b.title),
       /*#__PURE__*/React.createElement("span", { className: "bw-d" }, b.hidden && !b.done ? "افتحه لتكتشفه…" : b.desc))))),
   tab === "racheevos" && (() => {
-    const raAll = games.filter(g => g.hardware === "emulator" && g.ra && (g.ra.achievements || []).length);
+    const raAll = games.filter(g => raShows(g) && raAchList(g).length);
     const raPlats = [...new Set(raAll.map(g => g.platform))].sort();
     const raDevs = [...new Set(raAll.map(g => g.emuDevice || "pc"))];
     const raGamesList = raAll
@@ -5475,13 +5704,16 @@ function AchievementsView({
       });
     const totEarned = raGamesList.reduce((s, x) => s + x.earned.length, 0);
     const totAll = raGamesList.reduce((s, x) => s + (Number(x.g.ra.numAchievements) || x.list.length), 0);
-    const totPts = raGamesList.reduce((s, x) => s + x.pts, 0);
     const totHC = raGamesList.reduce((s, x) => s + x.earned.filter(a => a.hardcore).length, 0);
-    const mastered = raGamesList.filter(x => x.list.length && x.earned.length >= (Number(x.g.ra.numAchievements) || x.list.length)).length;
-    if (!raGamesList.length) return /*#__PURE__*/React.createElement("div", { className: "rag-empty" }, "لا توجد إنجازات بعد — استورد ألعابك من RetroAchievements عبر الإعدادات 🎮");
+    const mastered = raGamesList.filter(x => raIsMastered(x.g)).length;
+    /* من سجلّنا الداخلي raHist لا من RA — RA لا يحفظ تكرارًا */
+    const totMasteries = raGamesList.reduce((s, x) => s + raMasteries(x.g), 0);
+    const totRepeats = raGamesList.reduce((s, x) => s + raRepeats(x.g), 0);
+    const ptsRepeat = raGamesList.reduce((s, x) => s + raGamePoints(x.g), 0);
+    if (!raGamesList.length) return /*#__PURE__*/React.createElement("div", { className: "rag-empty" }, "لا توجد إنجازات بعد — افتح لعبة محاكي واضغط «🔗 اربط بلعبة في RetroAchievements» 🎮");
     return /*#__PURE__*/React.createElement("div", null,
       /*#__PURE__*/React.createElement("div", { className: "ach-sum", style: { marginTop: 12 } },
-        [["🏅", totEarned, "إنجاز", "#f5b942"], ["🎯", totPts, "نقطة RA", "#a78bfa"], ["🔥", totHC, "هاردكور", "#fb7185"], ["👑", mastered, "مكتملة", "#22d3ee"], ["📊", totAll ? Math.round(totEarned / totAll * 100) + "٪" : "—", "الإنجاز الكلي", "#4ade80"]]
+        [["🏅", totEarned, "إنجاز", "#f5b942"], ["⭐", ptsRepeat, "نقطة مع التكرار", "#a78bfa"], ["🔥", totHC, "هاردكور", "#fb7185"], ["👑", mastered, "مكتملة", "#22d3ee"], ["💎", totMasteries, "إتقان", "#f472b6"], ["🔁", totRepeats, "إعادة كسب", "#fb923c"], ["📊", totAll ? Math.round(totEarned / totAll * 100) + "٪" : "—", "الإنجاز الكلي", "#4ade80"]]
           .map(([ic, v, l, col], i) => /*#__PURE__*/React.createElement("div", { className: "ach-sum-cell", key: i },
             /*#__PURE__*/React.createElement("span", { className: "as-ic" }, ic),
             /*#__PURE__*/React.createElement("b", { style: { color: col } }, v),
@@ -5642,7 +5874,65 @@ function migrateGame(g) {
     }
     changed = true;
   }
+  /* أُلغي استيراد RA: `ra.playtimeSec` لم يعد يُقرأ في أي مكان (الوقت يدوي),
+     ووجوده يوهم أن هناك مصدرًا تلقائيًا للساعات. نمسحه من البيانات القديمة. */
+  if (newG.ra && newG.ra.playtimeSec != null) {
+    const ra2 = { ...newG.ra };
+    delete ra2.playtimeSec;
+    newG.ra = ra2;
+    changed = true;
+  }
+  /* ترميم قيمة يتيمة: raGameId بلا ra يجعل اللعبة تبدو مرتبطة وهي ليست كذلك
+     فلا تظهر لها بطاقة «اربط» ولا لوحة الإنجازات — تعطُّل صامت. */
+  if (newG.raGameId && !newG.ra) { newG.raGameId = ""; changed = true; }
   return { game: newG, changed };
+}
+/* ---------- إزالة ما خلّفه استيراد RetroAchievements القديم ----------
+   إصدار سابق كان يستورد ألعاب حساب RA للمكتبة ويكتب لها وقت لعب مُصطنَعًا
+   موزَّعًا على أيام الإنجازات. أُلغي ذلك بالكامل: الإضافة يدوية والوقت بالعدّاد
+   وحده. فنزيل أثره مرة واحدة، بحذر يميّز بين ما اخترعه الاستيراد وما سجّلته أنت:
+
+   • لعبة أنشأها الاستيراد ولم تلمسها يدويًا  ⇒ تُحذف كاملة.
+   • لعبة أضفتَها بنفسك ثم دمج الاستيراد وقته فيها ⇒ تبقى، وتُحذف جلسات RA
+     وحدها، وتُطرح ساعاتها من `hours` (طرح لا تصفير: يحفظ ساعات أدخلتَها
+     يدويًا بلا جلسات مقابلة).
+
+   ⚠️ لا يُستدعى مباشرة — `migrateGamesList` تستدعيه، فيرث المسارين معًا
+   (تحميل التطبيق والاستعادة) بلا احتمال نسيان أحدهما. */
+const isRaImportSession = s => !!s && (s.note === RA_IMPORT_NOTE || s.src === RA_SESSION_SRC);
+function raPurgeImported(list) {
+  const src = list || [];
+  if (!src.some(g => (g.sessions || []).some(isRaImportSession))) {
+    return { games: src, removed: [], stripped: 0, hoursDropped: 0 };
+  }
+  const removed = [];
+  const kept = [];
+  let stripped = 0, hoursDropped = 0;
+  for (const g of src) {
+    const sess = g.sessions || [];
+    const raSess = sess.filter(isRaImportSession);
+    if (!raSess.length) { kept.push(g); continue; }
+    const mine = sess.filter(s => !isRaImportSession(s));
+    /* "لمستها يدويًا" = أي أثر لا يمكن أن ينشئه الاستيراد */
+    const touched = mine.length > 0
+      || (g.playthroughs || []).length > 0
+      || (g.scoreAttempts || []).length > 0
+      || (g.parts || []).length > 0
+      || (g.goals || []).length > 0
+      || Number(g.rating) > 0
+      || !!(g.notes && String(g.notes).trim());
+    const raHours = raSess.reduce((t, s) => t + Math.max(0, Number(s.ms) || 0), 0) / 3600000;
+    hoursDropped += raHours;
+    if (!touched) { removed.push(g.id); continue; }
+    stripped++;
+    kept.push({ ...g, sessions: mine, hours: r1(Math.max(0, (Number(g.hours) || 0) - raHours)) });
+  }
+  const gone = new Set(removed);
+  /* لعبة محذوفة كانت أمًّا لألعاب باقية ⇒ نفكّ ارتباط أبنائها حتى لا ييتموا */
+  const games = gone.size
+    ? kept.map(g => gone.has(g.parentId) ? { ...g, parentId: "" } : g)
+    : kept;
+  return { games, removed, stripped, hoursDropped: r1(hoursDropped) };
 }
 function migrateGamesList(list) {
   let mig = false;
@@ -5651,7 +5941,11 @@ function migrateGamesList(list) {
     if (r.changed) mig = true;
     return r.game;
   });
-  return { games: out, changed: mig };
+  /* تنظيف استيراد RA القديم داخل الترحيل نفسه — ضمانًا لتغطية مساري التحميل
+     والاستعادة معًا (خطأ ٢ في AGENTS.md: الترحيل في مسار واحد). */
+  const purge = raPurgeImported(out);
+  if (purge.removed.length || purge.stripped) mig = true;
+  return { games: purge.games, changed: mig, purge: purge };
 }
 /* ---------- تختيم أركيد تلقائي ----------
    كل 3 ساعات لعب متراكمة = تختيمة جديدة. نتيجة كل تختيمة = أعلى محاولة من
@@ -5666,10 +5960,16 @@ function applyArcadeAutoComplete(g) {
   if (targetCount <= curCount) return g;
   let attempts = (g.scoreAttempts || []).map(a => ({ ...a }));
   const today = localDay(new Date());
+  /* تُستهلَك محاولة واحدة فقط لكل تختيمة — أعلى ما لم يُستهلك بعد.
+     كان الكود يعلّم كل المحاولات مستهلَكة في أول دورة، فإن تجاوزتَ 6 أو 9
+     ساعات دفعةً واحدة خرجت التختيمة الثانية والثالثة بنتيجة صفر. */
   for (let i = curCount; i < targetCount; i++) {
-    const unused = attempts.filter(a => !a.used);
-    const best = unused.reduce((m, a) => Math.max(m, Number(a.score) || 0), 0);
-    attempts = attempts.map(a => a.used ? a : { ...a, used: true });
+    let bestIdx = -1, best = 0;
+    attempts.forEach((a, idx) => {
+      const sc = Number(a.score) || 0;
+      if (!a.used && sc > best) { best = sc; bestIdx = idx; }
+    });
+    if (bestIdx >= 0) attempts = attempts.map((a, idx) => idx === bestIdx ? { ...a, used: true } : a);
     pts.push({ date: today, score: best, hours: 0 });
   }
   pts = pts.map((p, i) => ({ ...p, n: i + 1 }));
@@ -6056,31 +6356,38 @@ function InsightsView({ games, covers, ach, lvl, xp }) {
   /* 📈 سجل الخبرة */
   E("div", { className: "section-title" }, "📈 مصادر نقاط الخبرة"),
   (() => {
-    let exist = 0, hxp = 0, cxp = 0, rxp = 0;
+    let exist = 0, hxp = 0, cxp = 0, rxp = 0, axp = 0;
     const mmap = {};
     games.forEach(g => {
       if (!isShell(g)) exist += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
-      (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill") { const v = XP_PER_HOUR * (Number(sx.ms) || 0) / 3600000; hxp += v; const mk = String(sx.at).slice(0, 7); mmap[mk] = (mmap[mk] || 0) + v; } });
+      (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill" && sx.at) { const v = XP_PER_HOUR * (Number(sx.ms) || 0) / 3600000; hxp += v; const mk = localMonth(sx.at); mmap[mk] = (mmap[mk] || 0) + v; } });
       const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
       runs.forEach((r, i) => {
         const base = i === 0 ? 100 : 150, L = Math.max(0, Number(r.hours) || 0);
         const factor = L <= 5 ? 1 : 1 + 4 * (Math.min(L, 300) - 5) / 295;
         const v = Math.min(500, Math.round(base * factor));
         cxp += v;
-        const mk = String(r.date || "").slice(0, 7);
+        const mk = localMonth(r.date);
         if (mk.length === 7) mmap[mk] = (mmap[mk] || 0) + v;
       });
       rxp += gameRankInfo(runsCountOf(g)).pts;
+      axp += raGamePoints(g); // ⚠️ يطابق سطر baseXp — أي تعديل يطال الاثنين
     });
-    const srcs = [["🎮 اقتناء الألعاب", exist, "#a78bfa"], ["⏱ ساعات اللعب", Math.round(hxp), "#22d3ee"], ["🏁 التختيمات", Math.round(cxp), "#f5b942"], ["🏅 رتب الألعاب", Math.round(rxp), "#4ade80"]];
+    /* ⚠️ هذه البنود يجب أن تجمع إلى totalXp(games) بالضبط. أي مصدر جديد في
+       totalXp بلا بند هنا يظهر كفارق غير مفسَّر تحت المستوى. */
+    const chx = challengeXp(games), stx = streakXp(games);
+    const srcs = [["🎮 اقتناء الألعاب", exist, "#a78bfa"], ["⏱ ساعات اللعب", Math.round(hxp), "#22d3ee"], ["🏁 التختيمات", Math.round(cxp), "#f5b942"], ["🏅 رتب الألعاب", Math.round(rxp), "#4ade80"], ["🎖 إنجازات RetroAchievements", Math.round(axp), "#fb7185"], ["🎯 التحديات الأسبوعية", Math.round(chx), "#facc15"], ["🔥 سلسلة الأيام", Math.round(stx), "#fb923c"]].filter(x => x[1] > 0);
     const tot = Math.max(1, srcs.reduce((t, x) => t + x[1], 0));
     const months = [];
-    for (let i = 5; i >= 0; i--) { const d = new Date(); d.setMonth(d.getMonth() - i); months.push(d.toISOString().slice(0, 7)); }
+    for (let i = 5; i >= 0; i--) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); months.push(localDay(d).slice(0, 7)); }
     const mx = Math.max(1, ...months.map(m => mmap[m] || 0));
+    const shown = srcs.reduce((t, x) => t + x[1], 0), real = totalXp(games), drift = real - shown;
     return E("div", { className: "yy-card" },
       srcs.map(([l, v, c]) => E("div", { className: "xp-src", key: l },
         E("div", { className: "xp-src-t" }, l, E("b", null, v.toLocaleString("ar"), " نقطة")),
         E("div", { className: "next-bar" }, E("div", { className: "next-fill", style: { width: Math.round(v / tot * 100) + "%", background: c } })))),
+      E("div", { className: "xp-total" }, "الإجمالي: ", E("b", null, shown.toLocaleString("ar"), " نقطة"),
+        Math.abs(drift) > 1 ? E("span", { className: "xp-drift" }, " (فارق غير مفسَّر: " + Math.round(drift) + ")") : null),
       E("div", { className: "chall-k", style: { marginTop: 10 } }, "الخبرة المكتسبة آخر ٦ أشهر"),
       E("div", { className: "dist-bars" }, months.map(m => E("div", { className: "dist-col", key: m, title: Math.round(mmap[m] || 0) + " نقطة" },
         E("div", { className: "dist-bar" }, E("div", { className: "dist-fill", style: { height: Math.round((mmap[m] || 0) / mx * 100) + "%", background: "#f5b942" } })),
@@ -6102,10 +6409,9 @@ function BackupView({
   raUser,
   raKey,
   onSaveRaCreds,
-  raImp,
-  onRaSync,
-  raJunkCount,
-  onRaCleanup,
+  raBulk,
+  onRaRefreshAll,
+  raLinkedCount,
   bulk,
   onBulkEnrich,
   ttbBulk,
@@ -6440,34 +6746,31 @@ function BackupView({
     className: "auto-msg done"
   }, (raUser && raKey) ? "الحساب مُفعّل ✓" : "—")),
   /*#__PURE__*/React.createElement("div", { className: "bk-card" },
-    /*#__PURE__*/React.createElement("div", { className: "bk-title" }, "🎮 استيراد ألعابي من RetroAchievements"),
+    /*#__PURE__*/React.createElement("div", { className: "bk-title" }, "🏅 إنجازات RetroAchievements"),
     /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
-      "يجلب ألعاب حسابك مع أوقات اللعب الحقيقية وإنجازاتك، ويضيف ",
-      /*#__PURE__*/React.createElement("b", null, "فقط الألعاب التي لعبتها ٣٠ دقيقة فأكثر"),
-      " كألعاب محاكي. الألعاب الموجودة عندك تُحدَّث إنجازاتها بلا تكرار، ولا تُنقص ساعاتك المسجّلة يدويًا. أعد التشغيل وقتما شئت للمزامنة."),
-    /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
+      "الربط ", /*#__PURE__*/React.createElement("b", null, "يدوي بالكامل"), ": افتح لعبة محاكي عندك واضغط «🔗 اربط بلعبة في RetroAchievements». ",
+      "RA هنا ", /*#__PURE__*/React.createElement("b", null, "لا يضيف ألعابًا لمكتبتك ولا يكتب أي وقت لعب"),
+      " — الإنجازات فقط. ساعاتك تُسجَّل بالعدّاد اليدوي وحده."),
+    /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
+      raLinkedCount > 0
+        ? "🔗 عندك " + raLinkedCount + " لعبة مرتبطة بـRetroAchievements"
+        : "ما ربطت أي لعبة بعد — الربط من صفحة اللعبة"),
+    raLinkedCount > 0 && /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
       /*#__PURE__*/React.createElement("button", {
         className: "btn auto",
-        onClick: onRaSync,
-        disabled: raImp.state === "running" || !raUser || !raKey
-      }, raImp.state === "running"
-        ? "⏳ " + raImp.i + " / " + (raImp.total || "…")
-        : "🎮 استيراد / مزامنة الألعاب والإنجازات")),
+        onClick: onRaRefreshAll,
+        disabled: raBulk.state === "running" || !raUser || !raKey
+      }, raBulk.state === "running"
+        ? "⏳ " + raBulk.i + " / " + (raBulk.total || "…")
+        : "🔄 حدّث إنجازات كل الألعاب المرتبطة")),
     !raUser || !raKey ? /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "أضف اسم المستخدم والمفتاح بالأعلى أولًا") : null,
-    raImp.state === "running" && /*#__PURE__*/React.createElement("div", { className: "bk-progress" },
-      /*#__PURE__*/React.createElement("div", { className: "bk-progress-fill", style: { width: Math.round(raImp.i / Math.max(1, raImp.total) * 100) + "%" } })),
-    raImp.state === "done" && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" },
-      "تمت المزامنة ✓ — أُضيفت ", /*#__PURE__*/React.createElement("b", null, raImp.added), " لعبة، حُدِّثت ",
-      /*#__PURE__*/React.createElement("b", null, raImp.updated), "، وتُخطّيت ", /*#__PURE__*/React.createElement("b", null, raImp.skipped), " (أقل من ٣٠ دقيقة)"),
-    raImp.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raImp.err || "تعذّرت المزامنة"),
-    raJunkCount > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 10 } },
-      /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
-        "⚠️ عندك ", /*#__PURE__*/React.createElement("b", null, raJunkCount),
-        " لعبة أقل من ٣٠ دقيقة لعب. أوقاتها صحيحة الآن، وتقدر تحذفها إن ما تبيها."),
-      /*#__PURE__*/React.createElement("button", {
-        className: "btn ghost danger", style: { width: "100%", marginTop: 6 },
-        onClick: () => { if (window.confirm("حذف " + raJunkCount + " لعبة مستوردة بأقل من ٣٠ دقيقة؟ لن تُحذف أي لعبة سجّلت فيها تختيمة.")) onRaCleanup(); }
-      }, "🧹 حذف الألعاب المستوردة بأقل من ٣٠ دقيقة (" + raJunkCount + ")"))),
+    raBulk.state === "running" && /*#__PURE__*/React.createElement("div", { className: "bk-progress" },
+      /*#__PURE__*/React.createElement("div", { className: "bk-progress-fill", style: { width: Math.round(raBulk.i / Math.max(1, raBulk.total) * 100) + "%" } })),
+    raBulk.state === "done" && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" },
+      raBulk.changed > 0
+        ? "تم التحديث ✓ — تغيّرت إنجازات " + raBulk.changed + " لعبة"
+        : "تم التحديث ✓ — ما فيه جديد"),
+    raBulk.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raBulk.err || "تعذّر التحديث")),
   /*#__PURE__*/React.createElement("div", {
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
@@ -6757,7 +7060,7 @@ function App() {
   }, [timer, tick]);
   /* عند العودة للتطبيق (فتح التبويب/التطبيق): افحص فورًا عدّادًا نُسي شغّالًا */
   useEffect(() => {
-    const check = () => { if (!document.hidden) setTick(x => x + 1); };
+    const check = () => { if (!document.hidden) { setTick(x => x + 1); swWake(); } };
     document.addEventListener("visibilitychange", check);
     window.addEventListener("focus", check);
     return () => { document.removeEventListener("visibilitychange", check); window.removeEventListener("focus", check); };
@@ -6885,178 +7188,142 @@ function App() {
     } catch (e) {}
   }, [theme.mode]);
   const [nsoHub, setNsoHub] = useState(false);
+  /* بلاغ لمرة واحدة عمّا أزاله تنظيف استيراد RA القديم */
+  const [purgeNote, setPurgeNote] = useState(null);
   const [nsoSub, setNsoSub] = useState({ plan: "expansion", expiry: "" });
   const saveNsoSub = useCallback(async v => {
     setNsoSub(v);
     try { await sset(KEY_NSOSUB, v); } catch {}
   }, []);
-  /* ---------- استيراد/مزامنة RetroAchievements ----------
-     يجلب ألعاب حسابك، يقرأ وقت اللعب لكل واحدة، ويستورد فقط ما تجاوز
-     ٣٠ دقيقة كألعاب محاكي. الإنجازات تُخزَّن داخل اللعبة (g.ra). */
-  const RA_MIN_SECONDS = 30 * 60; // ٣٠ دقيقة
-  const [raImp, setRaImp] = useState({ state: "idle", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" });
-  /* الألعاب التي دخلت خطأً بالعتبة المعطوبة (كانت تُقارَن بالدقائق والقيمة ثوانٍ):
-     نستهدف فقط ما أنشأه الاستيراد نفسه (له جلسة الاستيراد) ولم تلمسه أنت بتختيمة. */
-  const raJunk = useMemo(() => games.filter(g =>
-    g.ra && Number(g.ra.playtimeSec || 0) > 0 && Number(g.ra.playtimeSec) < RA_MIN_SECONDS
-    && (g.sessions || []).some(s => s && s.note === RA_IMPORT_NOTE)
-    && !(g.playthroughs || []).length
-  ), [games]);
-  const raCleanup = useCallback(async () => {
-    const doomed = new Set(raJunk.map(g => g.id));
-    if (!doomed.size) return;
-    const list = gamesRef.current.filter(g => !doomed.has(g.id)).map(g => doomed.has(g.parentId) ? { ...g, parentId: "" } : g);
-    setGames(list); gamesRef.current = list;
-    try { await sset(KEY_GAMES, list); } catch {}
-    await Promise.all([...doomed].map(id => sdel(coverKey(id)).catch(() => {})));
-    setCovers(p => { const n = { ...p }; doomed.forEach(id => delete n[id]); return n; });
-    syncUnlocks(list, false);
-  }, [raJunk]);
-  /* تطبيق تقدّم لعبة واحدة على المكتبة — مشترك بين المزامنة اليدوية والتلقائية
-     حتى لا يتفرّع المنطق ويختلف السلوك بينهما. يرجع added | updated | skipped. */
-  const raApplyGame = useCallback(async (gid, prog) => {
-    if (!prog) return "skipped";
-    if (prog.playtimeSec < RA_MIN_SECONDS) return "skipped";
+  /* ---------- RetroAchievements: إنجازات فقط ----------
+     ⚠️ لا يضيف هذا القسم أي لعبة لمكتبتك، ولا يكتب أي وقت لعب، ولا يشغّل نفسه
+     تلقائيًا. إضافة الألعاب يدوية من زر ＋، والوقت بالعدّاد اليدوي وحده.
+     دور RA محصور في: تربط لعبة عندك بلعبة RA بيدك، فنجلب إنجازاتها (المحصَّل
+     والمتبقي) ونحدّث سجل التكرار الداخلي `g.raHist`. */
+  const [raPick, setRaPick] = useState(null);                                   // نافذة الربط اليدوي
+  const [raOne, setRaOne] = useState({ id: "", state: "idle", err: "" });       // تحديث لعبة واحدة
+  const [raBulk, setRaBulk] = useState({ state: "idle", i: 0, total: 0, changed: 0, err: "" });
+
+  /* يكتب نتيجة RA على لعبة واحدة: الإنجازات وسجل التكرار فقط.
+     لا يلمس hours ولا sessions ولا status ولا dateAdded — هذه ملك العدّاد اليدوي. */
+  const raApplyAchievements = useCallback(async (localId, gid, prog) => {
+    if (!prog) return null;
     const cur = gamesRef.current;
-    const plat = raPlatformOf(prog.consoleName);
-    const raHours = r1(prog.playtimeSec / 3600);
-    const key = raDedupKey(prog.title, plat);
-    const existing = cur.find(g => String(g.raGameId) === String(gid))
-      || cur.find(g => g.hardware === "emulator" && raDedupKey(g.name, g.platform) === key);
-    const sameGame = existing && String(existing.raGameId) === String(gid);
-    const dated = raSessionsFromAchievements(prog.achievements, raHours);
-    const lastISO = dated.last ? new Date(dated.last + "T18:00:00").toISOString() : nowISO();
-    if (existing) {
-      const prevRa = existing.ra || {};
-      const mergedAch = sameGame ? prog.achievements : (() => {
-        const m = new Map();
-        for (const a of prevRa.achievements || []) m.set(a.id, a);
-        for (const a of prog.achievements) m.set(a.id, a);
-        return [...m.values()];
-      })();
-      const raBlob = {
-        gameId: sameGame ? gid : (prevRa.gameId || gid),
-        numAchievements: sameGame ? prog.numAchievements : mergedAch.length,
-        numAwarded: sameGame ? prog.numAwarded : mergedAch.filter(a => a.earned).length,
-        numAwardedHardcore: sameGame ? prog.numAwardedHardcore : mergedAch.filter(a => a.hardcore).length,
-        completion: prog.completion, guideUrl: prog.guideUrl || prevRa.guideUrl || "",
-        achievements: mergedAch, syncedAt: prog.syncedAt,
-        playtimeSec: sameGame ? prog.playtimeSec : (Number(prevRa.playtimeSec) || 0) + prog.playtimeSec
-      };
-      const totalHours = sameGame ? raHours : r1((Number(prevRa.playtimeSec) || 0) / 3600 + raHours);
-      const keepHours = Math.max(Number(existing.hours) || 0, totalHours);
-      const mine = (existing.sessions || []).filter(s => !(s && s.note === RA_IMPORT_NOTE));
-      const reSess = raSessionsFromAchievements(raBlob.achievements, totalHours);
-      const olderAdd = dated.first && dated.first < (existing.dateAdded || "9999")
-        ? dated.first : (existing.dateAdded || dated.first || localDay(new Date()));
-      const newerPlay = String(existing.lastPlayed || "") > lastISO ? existing.lastPlayed : lastISO;
-      const next = gamesRef.current.map(g => g.id === existing.id ? {
-        ...g, raGameId: raBlob.gameId, ra: raBlob, hours: keepHours,
-        sessions: [...mine, ...reSess.sessions],
-        dateAdded: olderAdd, lastPlayed: newerPlay
-      } : g);
-      setGames(next); gamesRef.current = next;
-      try { await sset(KEY_GAMES, next); } catch {}
-      setDetail(p => p && p.game.id === existing.id ? { ...p, game: next.find(x => x.id === existing.id) } : p);
-      return "updated";
-    }
-    const raBlob = {
-      gameId: gid, numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
+    const g = cur.find(x => x.id === localId);
+    if (!g) return null;
+    const prevRa = g.ra || null;
+    const nextRa = {
+      gameId: gid, title: prog.title, consoleName: prog.consoleName,
+      numAchievements: prog.numAchievements, numAwarded: prog.numAwarded,
       numAwardedHardcore: prog.numAwardedHardcore, completion: prog.completion,
-      guideUrl: prog.guideUrl, achievements: prog.achievements, syncedAt: prog.syncedAt,
-      playtimeSec: prog.playtimeSec
+      guideUrl: prog.guideUrl || (prevRa && prevRa.guideUrl) || "",
+      achievements: prog.achievements, syncedAt: prog.syncedAt
     };
-    const ng = {
-      ...blankGame(), id: makeId(), name: raBaseTitle(prog.title) || prog.title, platform: plat,
-      hardware: "emulator", emuDevice: "pc", type: "downloaded",
-      status: prog.numAwarded > 0 && prog.numAwarded >= prog.numAchievements && prog.numAchievements > 0 ? "completed" : "playing",
-      hours: raHours,
-      sessions: dated.sessions.length ? dated.sessions : mkSess(null, raHours, RA_SESSION_SRC, RA_IMPORT_NOTE),
-      lastPlayed: lastISO,
-      dateAdded: dated.first || localDay(new Date()),
-      raGameId: gid, ra: raBlob
-    };
-    const next = [ng, ...gamesRef.current];
-    setGames(next); gamesRef.current = next;
+    const merged = raMergeHistory(g.raHist, prevRa, nextRa);
+    const next = cur.map(x => x.id === localId ? { ...x, raGameId: gid, ra: nextRa, raHist: merged.hist } : x);
+    setGames(next);
+    gamesRef.current = next;
     try { await sset(KEY_GAMES, next); } catch {}
-    return "added";
+    setDetail(p => p && p.game.id === localId ? { ...p, game: next.find(x => x.id === localId) } : p);
+    return merged;
   }, []);
 
-  const raSync = useCallback(async () => {
+  /* تحديث إنجازات لعبة مرتبطة — يدوي دائمًا، طلب واحد */
+  const raRefreshGame = useCallback(async localId => {
     const u = raUserRef.current, k = raKeyRef.current;
-    if (!u || !k) { setRaImp({ state: "error", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
-    setRaImp({ state: "running", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" });
-    let list;
-    try { list = await raUserGames(u, k); }
-    catch (e) { setRaImp({ state: "error", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "تعذّر جلب قائمة الألعاب — تحقق من الاسم والمفتاح" }); return; }
-    if (!list.length) { setRaImp({ state: "done", i: 0, total: 0, added: 0, updated: 0, skipped: 0, err: "" }); return; }
-    let added = 0, updated = 0, skipped = 0;
-    for (let i = 0; i < list.length; i++) {
-      const row = list[i];
-      const gid = row.GameID != null ? row.GameID : row.gameId;
-      setRaImp(p => ({ ...p, state: "running", i: i + 1, total: list.length, added, updated, skipped }));
-      let prog = null;
-      try { prog = await raGameProgress(gid, u, k); } catch (e) {}
-      const res = await raApplyGame(gid, prog);
-      if (res === "added") added++; else if (res === "updated") updated++; else skipped++;
-      await new Promise(r => setTimeout(r, 260));
+    const g = gamesRef.current.find(x => x.id === localId);
+    if (!g || !g.raGameId) return;
+    if (!u || !k) { setRaOne({ id: localId, state: "error", err: "أضف اسم المستخدم والمفتاح من الإعدادات أولًا" }); return; }
+    setRaOne({ id: localId, state: "running", err: "" });
+    try {
+      const prog = await raGameProgress(g.raGameId, u, k);
+      const res = await raApplyAchievements(localId, g.raGameId, prog);
+      if (!res) { setRaOne({ id: localId, state: "error", err: "ما رجعت بيانات لهذه اللعبة" }); return; }
+      syncUnlocks(gamesRef.current, true);
+      setRaOne({ id: localId, state: "done", err: "", newEarns: res.newEarns, reEarns: res.reEarns });
+    } catch (e) {
+      setRaOne({ id: localId, state: "error", err: "تعذّر الاتصال بـRetroAchievements" });
+    }
+  }, [raApplyAchievements]);
+
+  /* فتح نافذة الربط: نجلب قائمة ألعاب منصّة اللعبة (مخزَّنة مؤقتًا) ونبحث فيها محليًا */
+  const raOpenPick = useCallback(async game => {
+    const u = raUserRef.current, k = raKeyRef.current;
+    const seed = { gameId: game.id, name: game.name, platform: game.platform, q: game.name, results: [], all: null, err: "" };
+    if (!u || !k) { setRaPick({ ...seed, state: "nocreds" }); return; }
+    setRaPick({ ...seed, state: "loading" });
+    try {
+      const consoles = await raConsoles(u, k);
+      const cid = raMatchConsoleId(consoles, game.platform);
+      if (!cid) { setRaPick(p => p && { ...p, state: "unsupported" }); return; }
+      const list = await raGames(cid, u, k);
+      setRaPick(p => p && { ...p, state: "ready", all: list, results: raSearchGames(list, game.name, 25) });
+    } catch (e) {
+      setRaPick(p => p && { ...p, state: "error", err: "تعذّر جلب قائمة ألعاب المنصّة" });
+    }
+  }, []);
+  const raPickSearch = useCallback(q => {
+    setRaPick(p => p && { ...p, q: q, results: p.all ? raSearchGames(p.all, q, 25) : [] });
+  }, []);
+
+  /* اختيار المستخدم — هنا وحده يُكتب raGameId. لا شيء آخر يربط لعبة بـRA. */
+  /* ملاحظة: نقرأ raPick من الإغلاق لا من دالة تحديث setRaPick — دالة التحديث
+     في React 18 تُؤجَّل للرِندر التالي، فقراءة القيمة منها ترجع فارغة ويتوقف
+     الربط عند «جاري جلب إنجازاتك» بلا أي طلب. */
+  const raConfirmPick = useCallback(async raGid => {
+    const u = raUserRef.current, k = raKeyRef.current;
+    const localId = raPick && raPick.gameId;
+    if (!localId) return;
+    setRaPick(p => p && { ...p, state: "linking", err: "" });
+    try {
+      const prog = await raGameProgress(raGid, u, k);
+      const res = await raApplyAchievements(localId, raGid, prog);
+      if (!res) { setRaPick(p => p && { ...p, state: "ready", err: "ما قدرنا نقرأ تقدّمك في هذه اللعبة" }); return; }
+      syncUnlocks(gamesRef.current, true);
+      setRaPick(null);
+    } catch (e) {
+      setRaPick(p => p && { ...p, state: "ready", err: "تعذّر الاتصال — جرّب مرة ثانية" });
+    }
+  }, [raPick, raApplyAchievements]);
+
+  /* فك الارتباط: يمسح بيانات RA ويُبقي `raHist` — تاريخ تكرارك لا يُمحى أبدًا،
+     فلو أعدت الربط لنفس اللعبة يكمل العدّ من حيث وقف. */
+  const raUnlink = useCallback(async localId => {
+    const next = gamesRef.current.map(g => {
+      if (g.id !== localId) return g;
+      const c = { ...g, raGameId: "" };
+      delete c.ra;
+      return c;
+    });
+    setGames(next);
+    gamesRef.current = next;
+    try { await sset(KEY_GAMES, next); } catch {}
+    setDetail(p => p && p.game.id === localId ? { ...p, game: next.find(x => x.id === localId) } : p);
+  }, []);
+
+  /* تحديث كل الألعاب المرتبطة — يدوي من الإعدادات. طلب واحد لكل لعبة مرتبطة فقط،
+     فالتكلفة تتناسب مع ما ربطتَه أنت لا مع حجم حسابك في RA. */
+  const raRefreshAll = useCallback(async () => {
+    const u = raUserRef.current, k = raKeyRef.current;
+    if (!u || !k) { setRaBulk({ state: "error", i: 0, total: 0, changed: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
+    const linked = gamesRef.current.filter(g => g.raGameId && g.hardware === "emulator");
+    if (!linked.length) { setRaBulk({ state: "done", i: 0, total: 0, changed: 0, err: "" }); return; }
+    setRaBulk({ state: "running", i: 0, total: linked.length, changed: 0, err: "" });
+    let changed = 0;
+    for (let i = 0; i < linked.length; i++) {
+      const g = linked[i];
+      setRaBulk(p => ({ ...p, i: i + 1 }));
+      try {
+        const prog = await raGameProgress(g.raGameId, u, k);
+        const res = await raApplyAchievements(g.id, g.raGameId, prog);
+        if (res && (res.newEarns || res.reEarns)) changed++;
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 260)); // احترام حدود RA
     }
     try { await sset(KEY_GAMES, gamesRef.current); } catch {}
-    try { await sset(KEY_RA_AUTO, Date.now()); } catch {}
-    setRaImp({ state: "done", i: list.length, total: list.length, added, updated, skipped, err: "" });
-  }, [raApplyGame]);
-
-  /* ---------- المزامنة التلقائية (خفيفة) ----------
-     لا نُعيد جلب كل الألعاب: نقرأ آخر ما لعبته من RA (طلب واحد)، ونجلب تفاصيل لعبة
-     فقط إن تغيّر عدد إنجازاتها أو تاريخ لعبها عمّا هو مخزَّن — غالبًا صفر طلبات.
-     تعمل بصمت عند فتح التطبيق بفاصل ساعتين على الأقل. */
-  const RA_AUTO_MIN_GAP_MS = 2 * 3600 * 1000;
-  const [raAuto, setRaAuto] = useState({ state: "idle", changed: 0 });
-  const raAutoRunning = useRef(false);
-  const raAutoSync = useCallback(async (force) => {
-    const u = raUserRef.current, k = raKeyRef.current;
-    if (!u || !k || raAutoRunning.current) return;
-    if (!force) {
-      try {
-        const last = await sget(KEY_RA_AUTO);
-        if (last && Date.now() - Number(last) < RA_AUTO_MIN_GAP_MS) return;
-      } catch {}
-    }
-    raAutoRunning.current = true;
-    setRaAuto({ state: "running", changed: 0 });
-    let changed = 0;
-    try {
-      const recent = await raRecentGames(u, k);
-      for (const row of recent) {
-        const gid = row.GameID != null ? row.GameID : row.gameId;
-        const mine = gamesRef.current.find(g => String(g.raGameId) === String(gid));
-        const awarded = Number(row.NumAchieved != null ? row.NumAchieved : row.numAchieved) || 0;
-        const rowDay = String(row.LastPlayed || row.lastPlayed || "").slice(0, 10);
-        if (mine) {
-          const known = Number((mine.ra || {}).numAwarded) || 0;
-          const knownDay = String(mine.lastPlayed || "").slice(0, 10);
-          if (awarded === known && rowDay && knownDay && rowDay <= knownDay) continue;
-        }
-        let prog = null;
-        try { prog = await raGameProgress(gid, u, k); } catch (e) {}
-        const res = await raApplyGame(gid, prog);
-        if (res !== "skipped") changed++;
-        await new Promise(r => setTimeout(r, 260));
-      }
-      try { await sset(KEY_GAMES, gamesRef.current); } catch {}
-      try { await sset(KEY_RA_AUTO, Date.now()); } catch {}
-      if (changed) syncUnlocks(gamesRef.current, true);
-      setRaAuto({ state: "done", changed: changed });
-    } catch (e) {
-      setRaAuto({ state: "error", changed: changed });
-    }
-    raAutoRunning.current = false;
-  }, [raApplyGame]);
-  useEffect(() => {
-    if (!loaded || !raUser || !raKey) return;
-    const t = setTimeout(function () { raAutoSync(false); }, 4000);
-    return function () { clearTimeout(t); };
-  }, [loaded, raUser, raKey, raAutoSync]);
+    syncUnlocks(gamesRef.current, true);
+    setRaBulk({ state: "done", i: linked.length, total: linked.length, changed: changed, err: "" });
+  }, [raApplyAchievements]);
 
   const [bulk, setBulk] = useState({ state: "idle", i: 0, total: 0 });
   /* التحديث الشامل: `all=true` يعيد جلب كل شيء (بما فيه ما له بيانات) ويستبدل الغلاف
@@ -7160,34 +7427,6 @@ function App() {
       cover: coversRef.current[id] || p.cover
     } : p);
   }, [applyCover]);
-  const addFromNSO = async item => {
-    const game = {
-      ...blankGame(),
-      id: makeId(),
-      name: item.name,
-      platform: NSO_PLATFORM[item.sys] || "Nintendo Switch",
-      playedOn: "Nintendo Switch 2",
-      nso: true,
-      nsoSystem: item.sys,
-      genre: item.genre,
-      year: item.year,
-      developer: item.dev,
-      type: "digital",
-      source: "Nintendo eShop"
-    };
-    let cover = null;
-    try {
-      cover = await fetchNSOCover(item.name, NSO_SYSTEMS[item.sys] ? NSO_SYSTEMS[item.sys].label : item.sys);
-    } catch {}
-    await handleSave({
-      ...game,
-      hasCover: !!cover
-    }, cover);
-    return {
-      ok: true,
-      cover: !!cover
-    };
-  };
 
 
   // تحميل الأغلفة تدريجيًا في الخلفية وبتزامن محدود (يحترم حدود معدّل التخزين السحابي
@@ -7225,6 +7464,13 @@ function App() {
           const migRes = migrateGamesList(list);
           list = migRes.games;
           let mig = migRes.changed;
+          /* أُلغي استيراد RA: نزيل ما خلّفه ونحذف أغلفة ما حُذف، ثم نخبر
+             المستخدم بالعدد بدل أن تختفي ألعاب من مكتبته بصمت. */
+          if (migRes.purge && (migRes.purge.removed.length || migRes.purge.stripped)) {
+            const p = migRes.purge;
+            await Promise.all(p.removed.map(id => sdel(coverKey(id)).catch(() => {})));
+            setPurgeNote({ removed: p.removed.length, stripped: p.stripped, hours: p.hoursDropped });
+          }
           const rec = reconcileGamesTime(list);
           if (rec.changed) { list = rec.games; mig = true; }
           // ترحيل لمرة واحدة: ربط Sonic Generations كلعبة داخلية ضمن Sonic X Shadow Generations
@@ -7288,13 +7534,27 @@ function App() {
     return () => clearTimeout(t);
   }, [celebrate]);
   const syncUnlocks = useCallback((list, celebrateOn) => {
-    const keys = computeAchievements(list).unlockedKeys;
+    /* realGames هنا ضروري: شاشة الإنجازات تحسب من realGames، فحسابُ المفاتيح
+       من القائمة الخام يجعل المحفوظ يخالف المعروض. */
+    const keys = computeAchievements(realGames(list)).unlockedKeys;
     const base = unlockedRef.current;
     const fresh = keys.filter(k => !base.has(k));
     unlockedRef.current = new Set(keys);
     sset(KEY_UNLOCKED, keys);
     if (celebrateOn && fresh.length) setCelebrate(fresh.slice(0, 4).map(keyLabel));
   }, []);
+  /* مصدر واحد لفتح الإنجازات: أي تغيّر في المكتبة مهما كان مصدره.
+     كانت خمس دوال (addPlayTime، completeFromTimer، addPlaythrough،
+     logScoreAttempt، deleteRun) لا تستدعي syncUnlocks — وهي بالضبط الطرق التي
+     تُفتح بها الإنجازات فعلًا — فلا يظهر احتفال عند الاستحقاق، ويبقى
+     KEY_UNLOCKED قديمًا حتى تُعدّل أي لعبة فتنفجر الاحتفالات المتأخّرة معًا.
+     الأول بعد التحميل صامت: يصحّح الأساس بلا انفجار متراكم. */
+  const unlockPrimed = useRef(false);
+  useEffect(() => {
+    if (!loaded) return;
+    syncUnlocks(games, unlockPrimed.current);
+    unlockPrimed.current = true;
+  }, [games, loaded, syncUnlocks]);
   const recompressCovers = useCallback(async (opts = {}) => {
     const force = !!opts.force;
     const onProgress = opts.onProgress;
@@ -7439,9 +7699,16 @@ function App() {
   };
   const handleRestore = async (data, opts = {}) => {
     try {
-      const list = reconcileGamesTime(migrateGamesList(data.games).games).games;
+      const migR = migrateGamesList(data.games);
+      const list = reconcileGamesTime(migR.games).games;
       const cv = data.covers || {};
       await sset(KEY_GAMES, list);
+      /* النسخة قد تحوي ألعابًا أنشأها استيراد RA الملغى — أزالها الترحيل،
+         فنحذف أغلفتها أيضًا حتى لا تبقى بيانات غلاف يتيمة في IndexedDB. */
+      await Promise.all(migR.purge.removed.map(id => sdel(coverKey(id)).catch(() => {})));
+      if (migR.purge.removed.length || migR.purge.stripped) {
+        setPurgeNote({ removed: migR.purge.removed.length, stripped: migR.purge.stripped, hours: migR.purge.hoursDropped });
+      }
       await Promise.all(games.map(g => cv[g.id] ? null : sdel(coverKey(g.id))));
       await Promise.all(list.filter(g => cv[g.id]).map(g => sset(coverKey(g.id), cv[g.id])));
       const keys = Array.isArray(data.unlocked) ? data.unlocked : computeAchievements(list).unlockedKeys;
@@ -8188,10 +8455,9 @@ function App() {
     raUser: raUser,
     raKey: raKey,
     onSaveRaCreds: saveRaCreds,
-    raImp: raImp,
-    onRaSync: raSync,
-    raJunkCount: raJunk.length,
-    onRaCleanup: raCleanup,
+    raBulk: raBulk,
+    onRaRefreshAll: raRefreshAll,
+    raLinkedCount: games.filter(g => g.raGameId && g.hardware === "emulator").length,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
@@ -8214,7 +8480,21 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", { className: "tnag-t" }, "⏰ عدّاد «", tNag.name, "» شغال منذ ", fmtHours(tNag.hrs), " — ما زلت تلعب؟"),
   /*#__PURE__*/React.createElement("div", { className: "timer-btns" },
     /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: () => setTNag(null) }, "✅ ما زلت ألعب"),
-    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { pauseTimer(); const tg = games.find(x => x.id === tNag.gameId); setTNag(null); if (tg) openGame(tg); } }, "⏸️ هولد وافتح اللعبة لأعدّل الوقت"))), nsoHub && /*#__PURE__*/React.createElement(NsoHub, {
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { pauseTimer(); const tg = games.find(x => x.id === tNag.gameId); setTNag(null); if (tg) openGame(tg); } }, "⏸️ هولد وافتح اللعبة لأعدّل الوقت"))), purgeNote && /*#__PURE__*/React.createElement("div", {
+    className: "timer-nag"
+  }, /*#__PURE__*/React.createElement("div", { className: "tnag-t" },
+    "🧹 أُلغي استيراد الألعاب من RetroAchievements — صار الربط للإنجازات فقط، والوقت بالعدّاد اليدوي."),
+  /*#__PURE__*/React.createElement("div", { className: "tnag-t", style: { opacity: .85, fontWeight: 400 } },
+    purgeNote.removed > 0 ? "حُذفت " + purgeNote.removed + " لعبة كان الاستيراد أنشأها. " : "",
+    purgeNote.stripped > 0 ? "وأُزيل وقت RA من " + purgeNote.stripped + " لعبة أضفتَها بنفسك. " : "",
+    purgeNote.hours > 0 ? "إجمالي " + fmtHours(purgeNote.hours) + " وقت مُصطنَع." : ""),
+  /*#__PURE__*/React.createElement("div", { className: "timer-btns" },
+    /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: () => setPurgeNote(null) }, "✅ فهمت"))), /*#__PURE__*/React.createElement(RaLinkModal, {
+    pick: raPick,
+    onSearch: raPickSearch,
+    onConfirm: raConfirmPick,
+    onClose: () => setRaPick(null)
+  }), nsoHub && /*#__PURE__*/React.createElement(NsoHub, {
     nsoGames: nsoGames,
     covers: covers,
     sub: nsoSub,
@@ -8250,8 +8530,10 @@ function App() {
     onRemovePlaythrough: (id, idx) => deleteRun(id, { t: "m", i: idx }),
     onLogScoreAttempt: logScoreAttempt,
     onRemoveScoreAttempt: removeScoreAttempt,
-    onRaRefresh: () => raAutoSync(true),
-    raBusy: raAuto.state === "running",
+    onRaRefresh: raRefreshGame,
+    onRaLink: raOpenPick,
+    onRaUnlink: raUnlink,
+    raBusy: raOne.state === "running" && raOne.id === detail.game.id,
     onUpdateNote: updateNote,
     onSetRunMeta: setRunMeta,
     onAddPart: addPart,
@@ -9150,11 +9432,30 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .arcade-rank-badge{ padding:3px 10px; border-radius:999px; background:linear-gradient(90deg,rgba(255,95,162,.16),rgba(124,92,255,.16) 45%,rgba(34,211,238,.16)); border:1px solid rgba(124,92,255,.35); color:#e3d9ff !important; }
 /* ---- إنجازات RetroAchievements ---- */
 .ra-box{ border-color:rgba(255,193,68,.28); }
-.ra-auto-box{ border-color:rgba(74,222,128,.32); }
-.ra-auto-t{ display:flex; align-items:baseline; gap:8px; }
-.ra-auto-t b{ font-family:var(--num); font-size:22px; color:#4ade80; }
-.ra-auto-t span{ font-size:11.5px; color:var(--txt-3); }
-.ra-auto-s{ font-size:10.5px; color:var(--txt-4); margin-top:4px; }
+/* ===== إنجازات RetroAchievements: التكرار والربط اليدوي =====
+   ملاحظة: هذه كلها حاويات عمودية أو صفوف مستقلة — لا تستخدم .track لأي منها،
+   فهي flex صف وتسحق الأعمدة حتى يظهر النص حرفًا في كل سطر (خطأ ٥ في AGENTS.md). */
+/* سطر إجمالي مصادر الخبرة — يجب أن يطابق الإجمالي المعروض تحت المستوى */
+.xp-total{ margin-top:10px; padding-top:8px; border-top:1px solid var(--hair); font-size:12px; color:var(--txt-2); text-align:center; }
+.xp-total b{ font-family:var(--num); color:#f5b942; font-size:14px; }
+.xp-drift{ color:#fb7185; font-size:10.5px; }
+.ra-repeat-row{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px; }
+.ra-chip{ font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:999px; border:1px solid var(--hair); background:var(--e1); color:var(--txt-2); }
+.ra-chip.mast{ border-color:rgba(244,114,182,.4); background:rgba(244,114,182,.1); color:#f472b6; }
+.ra-chip.rep{ border-color:rgba(251,146,60,.4); background:rgba(251,146,60,.1); color:#fb923c; }
+.ra-chip.pts{ border-color:rgba(167,139,250,.4); background:rgba(167,139,250,.1); color:#a78bfa; }
+.ra-times{ display:inline-block; margin-inline-start:6px; font-family:var(--num); font-size:10px; font-weight:800; padding:1px 6px; border-radius:999px; background:rgba(251,146,60,.16); color:#fb923c; border:1px solid rgba(251,146,60,.35); }
+.ra-link-row{ display:flex; gap:6px; margin-top:6px; }
+.ra-link-row .btn{ flex:1; font-size:11px; }
+/* قائمة اختيار لعبة RA داخل نافذة الربط */
+.ra-pick-list{ display:flex; flex-direction:column; gap:6px; margin-top:10px; max-height:46vh; overflow-y:auto; }
+.ra-pick-row{ display:flex; align-items:center; gap:9px; width:100%; text-align:start; padding:9px 10px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); color:var(--txt-1); cursor:pointer; transition:border-color .15s var(--ease), background .15s var(--ease); }
+.ra-pick-row:hover:not(:disabled){ border-color:rgba(245,185,66,.45); background:rgba(245,185,66,.07); }
+.ra-pick-row:disabled{ opacity:.5; cursor:default; }
+.ra-pick-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.ra-pick-i b{ font-size:12.5px; direction:ltr; text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ra-pick-i small{ font-size:10px; color:var(--txt-4); }
+.ra-pick-go{ flex:none; font-size:10.5px; font-weight:700; color:#f5b942; }
 .ra-prog{ position:relative; height:16px; border-radius:999px; background:var(--well); overflow:hidden; margin:8px 0 4px; border:1px solid var(--hair); }
 .ra-prog-fill{ height:100%; background:linear-gradient(90deg,#f5b942,#ffd479); transition:width .5s var(--ease); }
 .ra-prog-t{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; font-family:var(--num); color:#0b0d17; text-shadow:0 0 3px rgba(255,255,255,.5); }
