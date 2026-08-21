@@ -154,6 +154,31 @@ eq(C.raGamePoints(raGame({ raHist: { v: 1, seededAt: "x", ach: { "1": { times: 2
   eq(e.hist.ach["1"].times, 2, "إعادة الضبط لا تُنقص العدّاد");
 }
 
+{
+  /* المطابقة التلقائية للربط الجماعي — تامّة فقط عمدًا.
+     المطابقة الجزئية تربط "Sonic" بـ"Sonic 3D Blast" فتسحب إنجازات لعبة أخرى
+     وتلوّث سجل التكرار بلا أي خطأ ظاهر. */
+  const list = [
+    { ID: 4111, Title: "Sonic the Hedgehog 2", NumAchievements: 3 },
+    { ID: 4112, Title: "Sonic the Hedgehog 2 [Subset - Bonus]", NumAchievements: 9 },
+    { ID: 5001, Title: "Streets of Rage 2", NumAchievements: 5 },
+    { ID: 5002, Title: "Streets of Rage 3", NumAchievements: 5 },
+    { ID: 6001, Title: "The Legend of Zelda", NumAchievements: 7 }
+  ];
+  eq(C.raExactMatches(list, "Sonic the Hedgehog 2")[0].id, 4111,
+    "اللعبة الأساسية تسبق النسخة الفرعية [Subset]");
+  eq(C.raExactMatches(list, "Streets of Rage 2").map(h => h.id), [5001],
+    "لا تلتقط الجزء 3 عند البحث عن الجزء 2");
+  eq(C.raExactMatches(list, "Sonic"), [],
+    "الاسم الجزئي لا يُطابق شيئًا — يُترك للربط اليدوي");
+  eq(C.raExactMatches(list, "Streets of Rage"), [],
+    "الاسم الناقص لا يُخمَّن");
+  ok(C.raExactMatches(list, "Legend of Zelda, The").length === 1,
+    "صيغة «, The» تُطابق العنوان الأصلي");
+  eq(C.raExactMatches(list, ""), [], "اسم فارغ ⇒ بلا مطابقة");
+  eq(C.raExactMatches(null, "Sonic the Hedgehog 2"), [], "قائمة فارغة لا تنهار");
+}
+
 /* ═══════════ ⑥ الترحيل وحذف استيراد RA الملغى ═══════════ */
 G("⑥ الترحيل");
 noThrow(() => C.migrateGamesList(null), "migrateGamesList(null) لا ينهار");

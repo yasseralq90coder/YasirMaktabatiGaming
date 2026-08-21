@@ -1951,6 +1951,33 @@ function raSearchGames(list, query, limit) {
   out.sort((a, b) => a.rank - b.rank || b.numAchievements - a.numAchievements || a.title.localeCompare(b.title));
   return out.slice(0, limit || 25);
 }
+/* مطابقة اسم لعبة داخل قائمة منصّة واحدة — للربط الجماعي التلقائي.
+   ⚠️ تامّة فقط عمدًا. `raMatchGame` (المستخدَمة للرقم القياسي) تقبل التطابق
+   الجزئي، وهو يربط "Sonic" بـ"Sonic 3D Blast" بصمت — ربطٌ خاطئ يسحب إنجازات
+   لعبة أخرى ويلوّث سجل التكرار. ما لا يُطابَق تمامًا يُترك للربط اليدوي.
+   نتجاهل النسخ الفرعية ([Subset] و~Hack~) لأن المقصود اللعبة الأساسية. */
+function raExactMatches(list, name) {
+  const wanted = new Set();
+  for (const v of lrVariants(name)) if (v) wanted.add(v);
+  const nb = lrNorm(raBaseTitle(name));
+  if (nb) wanted.add(nb);
+  const out = [];
+  for (const g of list || []) {
+    const title = g.Title || g.title || "";
+    if (!title) continue;
+    const t = lrNorm(title);
+    if (!wanted.has(t) && !wanted.has(lrNorm(raBaseTitle(title)))) continue;
+    out.push({
+      id: g.ID != null ? g.ID : g.id,
+      title: title,
+      subset: /[\[~]/.test(title),
+      n: Number(g.NumAchievements || g.numAchievements) || 0
+    });
+  }
+  /* اللعبة الأساسية قبل النسخ الفرعية، ثم الأغنى بالإنجازات */
+  out.sort((a, b) => (a.subset ? 1 : 0) - (b.subset ? 1 : 0) || b.n - a.n);
+  return out;
+}
 /* تفاصيل لعبة + تقدّم المستخدم: وقت اللعب بالدقائق وقائمة الإنجازات كاملة */
 async function raGameProgress(gameId, user, key) {
   const j = await raFetch("API_GetGameInfoAndUserProgress.php?g=" + gameId + "&u=" + encodeURIComponent(user), user, key);
@@ -3421,7 +3448,12 @@ function GameDetail({
     (() => { const cut = Date.now() - 14 * 86400000; const h = (game.sessions || []).filter(s => s.src !== "backfill" && new Date(s.at).getTime() >= cut).reduce((t, s) => t + s.ms, 0) / 3600000; return h > 0 ? /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, r1(h / 14)), /*#__PURE__*/React.createElement("span", null, "⚡ س/يوم (14ي)")) : null; })()
   ),
   /* ===== التبويبات ===== */
-  /*#__PURE__*/React.createElement("div", { className: "dtabs" }, [["overview", "🎮 نظرة"], ["runs", "🏁 تختيمات"], ["sessions", "📓 جلسات"], ["tools", "🧰 أدوات"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+  /*#__PURE__*/React.createElement("div", { className: "dtabs" }, [["overview", "🎮 نظرة"], ["runs", "🏁 تختيمات"]]
+    /* تبويب الإنجازات لألعاب المحاكي وحدها. بلا تبويب خاص كانت لوحة RA تحمل
+       className "runs-box" فتختفي خارج تبويب التختيمات، وزرّها "btn auto"
+       فيختفي خارج تبويب الأدوات — محبوسة في تبويبين معًا فلا تُرى أبدًا. */
+    .concat(raCanLink ? [["ra", "🏅 إنجازات"]] : [])
+    .concat([["sessions", "📓 جلسات"], ["tools", "🧰 أدوات"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
     key: k,
     className: "dtab" + (dTab === k ? " on" : ""),
     style: dTab === k ? { borderColor: c, color: c, background: c + "1a" } : null,
@@ -3666,14 +3698,14 @@ function GameDetail({
     raState === "nolb" && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "🌍 اللعبة موجودة لكن بلا لوحة صدارة نتائج"),
     raState === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, "🌍 تعذّر الاتصال — تحقق من المفتاح")),
   /* ===== ربط يدوي بـRetroAchievements — لألعاب المحاكي غير المرتبطة ===== */
-  raCanLink && !raLinked && /*#__PURE__*/React.createElement("div", { className: "runs-box ra-box" },
+  raCanLink && !raLinked && /*#__PURE__*/React.createElement("div", { className: "ra-box" },
     /*#__PURE__*/React.createElement("div", { className: "runs-head" },
       /*#__PURE__*/React.createElement("span", null, "🏅 إنجازات RetroAchievements")),
     /*#__PURE__*/React.createElement("p", { className: "bk-desc", style: { margin: "6px 0 10px" } },
       "اربط هذه اللعبة بلعبتها في RetroAchievements لتشوف إنجازاتك: اللي حصلت عليها واللي باقية. ",
       "الربط ", /*#__PURE__*/React.createElement("b", null, "لا يغيّر ساعاتك ولا يضيف ألعابًا لمكتبتك"), " — الإنجازات فقط."),
     /*#__PURE__*/React.createElement("button", {
-      className: "btn auto", style: { width: "100%" }, onClick: () => onRaLink(game)
+      className: "btn primary", style: { width: "100%" }, onClick: () => onRaLink(game)
     }, "🔗 اربط بلعبة في RetroAchievements")),
   /* ===== إنجازات RetroAchievements — لألعاب المحاكي المرتبطة فقط ===== */
   raLinked && (() => {
@@ -3697,7 +3729,7 @@ function GameDetail({
       if (n <= 1) return null;
       return /*#__PURE__*/React.createElement("span", { className: "ra-times", title: "حصلت عليه " + n + " مرات" }, "🔁 ×", n);
     };
-    return /*#__PURE__*/React.createElement("div", { className: "runs-box ra-box" },
+    return /*#__PURE__*/React.createElement("div", { className: "ra-box" },
       /*#__PURE__*/React.createElement("div", { className: "runs-head" },
         /*#__PURE__*/React.createElement("span", null, "🏅 إنجازات RetroAchievements"),
         /*#__PURE__*/React.createElement("b", null, earned.length, " / ", tot, " • ", pts_, "/", totPts, " نقطة")),
@@ -3752,7 +3784,7 @@ function GameDetail({
             /*#__PURE__*/React.createElement("span", { className: "ra-pts" }, a.points));
           })),
       /*#__PURE__*/React.createElement("button", {
-        className: "btn auto", style: { width: "100%", marginTop: 8 },
+        className: "btn primary", style: { width: "100%", marginTop: 8 },
         onClick: () => onRaRefresh(game.id), disabled: busy
       }, busy ? "⏳ جاري التحديث…" : "🔄 حدّث الإنجازات"),
       /*#__PURE__*/React.createElement("a", {
@@ -6479,8 +6511,9 @@ function BackupView({
   raKey,
   onSaveRaCreds,
   raBulk,
-  onRaRefreshAll,
+  onRaPullAll,
   raLinkedCount,
+  raEmuCount,
   bulk,
   onBulkEnrich,
   ttbBulk,
@@ -6817,29 +6850,42 @@ function BackupView({
   /*#__PURE__*/React.createElement("div", { className: "bk-card" },
     /*#__PURE__*/React.createElement("div", { className: "bk-title" }, "🏅 إنجازات RetroAchievements"),
     /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
-      "الربط ", /*#__PURE__*/React.createElement("b", null, "يدوي بالكامل"), ": افتح لعبة محاكي عندك واضغط «🔗 اربط بلعبة في RetroAchievements». ",
-      "RA هنا ", /*#__PURE__*/React.createElement("b", null, "لا يضيف ألعابًا لمكتبتك ولا يكتب أي وقت لعب"),
-      " — الإنجازات فقط. ساعاتك تُسجَّل بالعدّاد اليدوي وحده."),
+      "يمرّ على ", /*#__PURE__*/React.createElement("b", null, "كل ألعاب المحاكي في مكتبتك"),
+      ": المرتبطة تُحدَّث إنجازاتها، وغير المرتبطة يُبحث عن مطابق تامّ لاسمها في منصّتها ",
+      "فتُربَط تلقائيًا. ما لا يُطابَق تمامًا يُترك لك للربط اليدوي من صفحة اللعبة ← تبويب «🏅 إنجازات»، ",
+      "لأن التخمين يسحب إنجازات لعبة أخرى. ",
+      /*#__PURE__*/React.createElement("b", null, "لا يضيف ألعابًا لمكتبتك ولا يكتب أي وقت لعب"), "."),
     /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
-      raLinkedCount > 0
-        ? "🔗 عندك " + raLinkedCount + " لعبة مرتبطة بـRetroAchievements"
-        : "ما ربطت أي لعبة بعد — الربط من صفحة اللعبة"),
-    raLinkedCount > 0 && /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
+      raEmuCount === 0
+        ? "ما عندك ألعاب محاكي في المكتبة"
+        : "🧪 " + raEmuCount + " لعبة محاكي • 🔗 " + raLinkedCount + " مرتبطة"),
+    raEmuCount > 0 && /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
       /*#__PURE__*/React.createElement("button", {
         className: "btn auto",
-        onClick: onRaRefreshAll,
+        onClick: onRaPullAll,
         disabled: raBulk.state === "running" || !raUser || !raKey
       }, raBulk.state === "running"
         ? "⏳ " + raBulk.i + " / " + (raBulk.total || "…")
-        : "🔄 حدّث إنجازات كل الألعاب المرتبطة")),
+        : "⬇️ اسحب إنجازات كل ألعاب المحاكي")),
     !raUser || !raKey ? /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" }, "أضف اسم المستخدم والمفتاح بالأعلى أولًا") : null,
     raBulk.state === "running" && /*#__PURE__*/React.createElement("div", { className: "bk-progress" },
       /*#__PURE__*/React.createElement("div", { className: "bk-progress-fill", style: { width: Math.round(raBulk.i / Math.max(1, raBulk.total) * 100) + "%" } })),
     raBulk.state === "done" && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" },
-      raBulk.changed > 0
-        ? "تم التحديث ✓ — تغيّرت إنجازات " + raBulk.changed + " لعبة"
-        : "تم التحديث ✓ — ما فيه جديد"),
-    raBulk.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raBulk.err || "تعذّر التحديث")),
+      raBulk.none ? "ما عندك ألعاب محاكي" : (() => {
+        const bits = [];
+        if (raBulk.linked) bits.push("🔗 رُبطت " + raBulk.linked);
+        if (raBulk.updated) bits.push("🔄 حُدِّثت " + raBulk.updated);
+        if (raBulk.nomatch) bits.push("❓ بلا مطابق " + raBulk.nomatch);
+        if (raBulk.unsupported) bits.push("🌍 منصّة غير مدعومة " + raBulk.unsupported);
+        if (raBulk.failed) bits.push("⚠️ فشلت " + raBulk.failed);
+        return bits.length ? "تم ✓ — " + bits.join(" • ") : "تم ✓ — ما فيه جديد";
+      })()),
+    /* أسماء ما لم يُطابَق: هي ما يحتاج ربطًا يدويًا، فإخفاؤها يترك المستخدم يخمّن */
+    raBulk.state === "done" && (raBulk.misses || []).length > 0 && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle", style: { marginTop: 6 } },
+      /*#__PURE__*/React.createElement("b", null, "تحتاج ربطًا يدويًا:"),
+      /*#__PURE__*/React.createElement("div", { className: "ra-miss" },
+        raBulk.misses.map((m, i) => /*#__PURE__*/React.createElement("span", { key: i, className: "ra-miss-i" }, m)))),
+    raBulk.state === "error" && /*#__PURE__*/React.createElement("div", { className: "auto-msg err" }, raBulk.err || "تعذّر السحب")),
   /*#__PURE__*/React.createElement("div", {
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
@@ -7385,26 +7431,49 @@ function App() {
 
   /* تحديث كل الألعاب المرتبطة — يدوي من الإعدادات. طلب واحد لكل لعبة مرتبطة فقط،
      فالتكلفة تتناسب مع ما ربطتَه أنت لا مع حجم حسابك في RA. */
-  const raRefreshAll = useCallback(async () => {
+
+  /* ---------- سحب مباشر لكل ألعاب المحاكي ----------
+     يمرّ على كل لعبة محاكي في مكتبتك: المرتبطة تُحدَّث إنجازاتها، وغير المرتبطة
+     يُبحث عن مطابق تامّ لاسمها داخل قائمة منصّتها في RA فتُربَط تلقائيًا.
+     ما لا يُطابَق تمامًا يُترك لك للربط اليدوي بدل تخمينٍ يسحب إنجازات لعبة أخرى.
+     ⚠️ لا يضيف ولا لعبة واحدة للمكتبة ولا يكتب أي وقت لعب — إنجازات فقط. */
+  const raPullAll = useCallback(async () => {
     const u = raUserRef.current, k = raKeyRef.current;
-    if (!u || !k) { setRaBulk({ state: "error", i: 0, total: 0, changed: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
-    const linked = gamesRef.current.filter(g => g.raGameId && g.hardware === "emulator");
-    if (!linked.length) { setRaBulk({ state: "done", i: 0, total: 0, changed: 0, err: "" }); return; }
-    setRaBulk({ state: "running", i: 0, total: linked.length, changed: 0, err: "" });
-    let changed = 0;
-    for (let i = 0; i < linked.length; i++) {
-      const g = linked[i];
-      setRaBulk(p => ({ ...p, i: i + 1 }));
+    if (!u || !k) { setRaBulk({ state: "error", i: 0, total: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
+    const emus = gamesRef.current.filter(g => g && g.hardware === "emulator" && !isShell(g));
+    if (!emus.length) { setRaBulk({ state: "done", i: 0, total: 0, err: "", none: true }); return; }
+    setRaBulk({ state: "running", i: 0, total: emus.length, linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0, err: "" });
+    const tally = { linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0 };
+    const misses = [];
+    let consoles = null;
+    const listCache = new Map();   // منصّة → قائمة ألعابها (فوق تخزين raGames المؤقّت)
+    for (let i = 0; i < emus.length; i++) {
+      const g = emus[i];
+      setRaBulk(p => ({ ...p, i: i + 1, ...tally }));
       try {
-        const prog = await raGameProgress(g.raGameId, u, k);
-        const res = await raApplyAchievements(g.id, g.raGameId, prog);
-        if (res && (res.newEarns || res.reEarns)) changed++;
-      } catch (e) {}
-      await new Promise(r => setTimeout(r, 260)); // احترام حدود RA
+        let gid = g.raGameId;
+        /* غير مرتبطة: ابحث عن مطابق تامّ داخل قائمة منصّتها */
+        if (!gid) {
+          if (!consoles) consoles = await raConsoles(u, k);
+          const cid = raMatchConsoleId(consoles, g.platform);
+          if (!cid) { tally.unsupported++; misses.push(g.name + " — منصّة غير مدعومة"); continue; }
+          if (!listCache.has(cid)) listCache.set(cid, await raGames(cid, u, k));
+          const hits = raExactMatches(listCache.get(cid), g.name);
+          if (!hits.length) { tally.nomatch++; misses.push(g.name); continue; }
+          gid = hits[0].id;
+        }
+        const prog = await raGameProgress(gid, u, k);
+        const res = await raApplyAchievements(g.id, gid, prog);
+        if (!res) { tally.failed++; continue; }
+        if (g.raGameId) tally.updated++; else tally.linked++;
+      } catch (e) {
+        tally.failed++;
+      }
+      await new Promise(r => setTimeout(r, 260));   // احترام حدود RA
     }
-    try { await sset(KEY_GAMES, gamesRef.current); } catch {}
+    try { await sset(KEY_GAMES, gamesRef.current); } catch (e) {}
     syncUnlocks(gamesRef.current, true);
-    setRaBulk({ state: "done", i: linked.length, total: linked.length, changed: changed, err: "" });
+    setRaBulk({ state: "done", i: emus.length, total: emus.length, ...tally, misses: misses.slice(0, 12), err: "" });
   }, [raApplyAchievements]);
 
   const [bulk, setBulk] = useState({ state: "idle", i: 0, total: 0 });
@@ -8574,8 +8643,9 @@ function App() {
     raKey: raKey,
     onSaveRaCreds: saveRaCreds,
     raBulk: raBulk,
-    onRaRefreshAll: raRefreshAll,
+    onRaPullAll: raPullAll,
     raLinkedCount: games.filter(g => g.raGameId && g.hardware === "emulator").length,
+    raEmuCount: games.filter(g => g.hardware === "emulator" && !isShell(g)).length,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
@@ -9146,6 +9216,8 @@ const CSS = `
 .dbody:not(.tab-runs) .runs-box:not(.sess-log){display:none}
 .dbody:not(.tab-sessions) :is(.sess-box,.sess-log,.sess-log-btn){display:none}
 .dbody:not(.tab-tools) :is(.btn.auto,.cover-tools,.trailer-section,.gd-toolmsg,.shots-btn){display:none}
+.dbody:not(.tab-ra) .ra-box{display:none}
+.dbody.tab-ra > *:not(.dtabs):not(.ra-box){display:none}
 
 /* ---------- شريط الفلاتر ---------- */
 .ftoolbar { display:flex; gap:8px; align-items:stretch; }
@@ -9590,6 +9662,9 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .xp-total{ margin-top:10px; padding-top:8px; border-top:1px solid var(--hair); font-size:12px; color:var(--txt-2); text-align:center; }
 .xp-total b{ font-family:var(--num); color:#f5b942; font-size:14px; }
 .xp-drift{ color:#fb7185; font-size:10.5px; }
+/* أسماء ألعاب المحاكي التي لم تُطابَق تلقائيًا — تحتاج ربطًا يدويًا */
+.ra-miss{ display:flex; flex-direction:column; gap:3px; margin-top:5px; }
+.ra-miss-i{ font-size:10.5px; color:var(--txt-3); padding:3px 7px; border-radius:6px; background:var(--well); direction:ltr; text-align:start; }
 .ra-repeat-row{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px; }
 .ra-chip{ font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:999px; border:1px solid var(--hair); background:var(--e1); color:var(--txt-2); }
 .ra-chip.mast{ border-color:rgba(244,114,182,.4); background:rgba(244,114,182,.1); color:#f472b6; }
