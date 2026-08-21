@@ -1763,15 +1763,15 @@ const RA_ALIASES = {
   "PlayStation 2": ["playstation2", "ps2"],
   "PSP": ["playstationportable", "psp"],
   "Nintendo 64": ["nintendo64", "n64"],
-  "SNES": ["snes", "superfamicom", "super nintendo"],
-  "NES": ["nintendoentertainmentsystem", "famicom", "nes"],
+  "SNES": ["snes", "supernintendo", "superfamicom", "snessuperfamicom"],
+  "NES": ["nes", "nesfamicom", "nintendoentertainmentsystem", "famicom"],
   "Nintendo GameCube": ["gamecube"],
   "Nintendo DS": ["nintendods"],
   "Game Boy Advance": ["gameboyadvance", "gba"],
-  "Game Boy / Color": ["gameboy", "gameboycolor"],
-  "TurboGrafx-16": ["turbografx", "pcengine"],
+  "Game Boy / Color": ["gameboy", "gameboycolor", "game boy"],
+  "TurboGrafx-16": ["turbografx16", "pcengineturbografx16", "turbografx", "pcengine"],
   "Atari 2600": ["atari2600"],
-  "3DO": ["3do"]
+  "3DO": ["3do", "3dointeractivemultiplayer"]
 };
 /* ══════════ مطابقة المنصّة مع نتائج RAWG ══════════
    RAWG لا يعرف أسماء منصّاتنا العربية/المختصرة، وبحثه بلا فلتر يرجع أحيانًا نسخة
@@ -1850,14 +1850,44 @@ async function raConsoles(user, key) {
   try { await sset("gamelib:raconsoles", list); } catch {}
   return list;
 }
+/* مطابقة منصّتنا مع جهاز في RetroAchievements.
+   ⚠️ كان هذا يقارن بـ`lrNorm` التي **تُبقي المسافات** بينما الأسماء المستعارة
+   مكتوبة بلا مسافات ("playstation2")، فـ"playstation 2".includes("playstation2")
+   ترجع false — و7 من 20 منصّة كانت تُبلَّغ «غير مدعومة» وهي مدعومة تمامًا
+   (PS2، PSP، N64، NDS، GBA، Game Boy، Atari 2600). خطأ 19.
+
+   نجرّد المسافات من الطرفين (`raKeyNorm`) ثم:
+   1) تطابق تامّ أولًا عبر كل الأجهزة — يحسم PS1 مقابل PS2.
+   2) ثم احتواء، بشرط **تطابق الأرقام** بين الاسمين: الأرقام هي ما يفرّق الأجيال
+      ("playstation" ⊂ "playstation2"، "wii" ⊂ "wiiu")، فبلا هذا الشرط يلتقط
+      اسمُ الجيل الأول جهازَ الجيل الثاني بصمت (خطأ 6 حرفيًا).
+   3) وعند تعدّد المرشّحين نأخذ الأقصر — الأقرب للاسم المطلوب. */
+const raDigits = s => (String(s).match(/\d+/g) || []).join(",");
 function raMatchConsoleId(consoles, platformName) {
-  const wanted = RA_ALIASES[platformName];
-  if (!wanted) return null;
-  for (const c of consoles) {
-    const cn = lrNorm(c.Name || c.name || "");
-    if (wanted.some(w => cn.includes(lrNorm(w)))) return c.ID != null ? c.ID : c.id;
+  const wanted = (RA_ALIASES[platformName] || []).map(raKeyNorm).filter(Boolean);
+  if (!wanted.length) return null;
+  const rows = (consoles || []).map(c => ({
+    id: c.ID != null ? c.ID : c.id,
+    key: raKeyNorm(c.Name || c.name || "")
+  })).filter(r => r.key && r.id != null);
+  /* 1) تطابق تامّ */
+  for (const w of wanted) {
+    const hit = rows.find(r => r.key === w);
+    if (hit) return hit.id;
   }
-  return null;
+  /* 2) احتواء بشرط تطابق الأرقام */
+  const cands = [];
+  for (const w of wanted) {
+    const wd = raDigits(w);
+    for (const r of rows) {
+      if (!r.key.includes(w)) continue;
+      if (raDigits(r.key) !== wd) continue;   // جيل مختلف — ارفض
+      cands.push(r);
+    }
+  }
+  if (!cands.length) return null;
+  cands.sort((a, b) => a.key.length - b.key.length);
+  return cands[0].id;
 }
 async function raGames(consoleId, user, key) {
   if (RA_CACHE.games.has(consoleId)) return RA_CACHE.games.get(consoleId);

@@ -179,6 +179,41 @@ eq(C.raGamePoints(raGame({ raHist: { v: 1, seededAt: "x", ach: { "1": { times: 2
   eq(C.raExactMatches(null, "Sonic the Hedgehog 2"), [], "قائمة فارغة لا تنهار");
 }
 
+{
+  /* مطابقة منصّتنا بجهاز في RA. أسماء الأجهزة هنا هي أسماء RA الفعلية.
+     كانت المقارنة بـlrNorm التي تُبقي المسافات بينما الأسماء المستعارة بلا
+     مسافات، فـ7 منصّات مدعومة كانت تُبلَّغ «غير مدعومة» — أشهرها PS2. */
+  const RA_CONSOLES = ["PlayStation", "PlayStation 2", "PlayStation Portable", "Nintendo 64",
+    "Nintendo DS", "Game Boy", "Game Boy Color", "Game Boy Advance", "SNES/Super Famicom",
+    "NES/Famicom", "GameCube", "Genesis/Mega Drive", "Master System", "Game Gear", "Dreamcast",
+    "Saturn", "Neo Geo CD", "Arcade", "Atari 2600", "3DO Interactive Multiplayer",
+    "PC Engine/TurboGrafx-16"].map((n, i) => ({ ID: i + 1, Name: n }));
+  const nameFor = plat => {
+    const id = C.raMatchConsoleId(RA_CONSOLES, plat);
+    const hit = RA_CONSOLES.find(c => c.ID === id);
+    return hit ? hit.Name : null;
+  };
+  const unmatched = Object.keys(C.RA_ALIASES).filter(p => nameFor(p) === null);
+  eq(unmatched, [], "كل منصّة لها اسم مستعار تجد جهازها في RA");
+  eq(nameFor("PlayStation 2"), "PlayStation 2", "PS2 مدعومة — الاسم بمسافة والاسم المستعار بلا مسافة");
+  eq(nameFor("PSP"), "PlayStation Portable", "PSP تُطابق PlayStation Portable");
+  eq(nameFor("Game Boy / Color"), "Game Boy", "جهاز باسم مركّب يُطابق");
+  eq(nameFor("TurboGrafx-16"), "PC Engine/TurboGrafx-16", "اسم جهاز يحمل رقمًا داخله");
+
+  /* فخّ الأجيال: "playstation" جزء من "playstation2" حرفيًا (خطأ 6). */
+  eq(nameFor("PlayStation"), "PlayStation", "PS1 لا تلتقط PS2");
+  {
+    const flipped = [...RA_CONSOLES].reverse();
+    const id = C.raMatchConsoleId(flipped, "PlayStation");
+    eq((flipped.find(c => c.ID === id) || {}).Name, "PlayStation",
+      "PS1 لا تلتقط PS2 حتى لو جاءت PS2 أولًا في القائمة");
+  }
+  eq(C.raMatchConsoleId(RA_CONSOLES, "Nintendo Switch"), null,
+    "منصّة لا يدعمها RA ترجع null بلا تخمين");
+  eq(C.raMatchConsoleId([], "PlayStation 2"), null, "قائمة أجهزة فارغة لا تنهار");
+  eq(C.raMatchConsoleId(null, "PlayStation 2"), null, "قائمة null لا تنهار");
+}
+
 /* ═══════════ ⑥ الترحيل وحذف استيراد RA الملغى ═══════════ */
 G("⑥ الترحيل");
 noThrow(() => C.migrateGamesList(null), "migrateGamesList(null) لا ينهار");
