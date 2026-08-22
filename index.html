@@ -1286,13 +1286,163 @@ const XP_PER_HOUR = 10;
 function realPlayHours(g) {
   return (g.sessions || []).reduce((t, s) => t + (s && s.src !== "backfill" ? Math.max(0, Number(s.ms) || 0) : 0), 0) / 3600000;
 }
+/* ═══════════ نظام المِران ═══════════
+   طبقة محسوبة بالكامل من البيانات الموجودة — لا حقول جديدة ولا ترحيل.
+   ثلاثة مقاييس لا غير: الوقت، والتختيم، وإعادة التختيم.
+   عدد الألعاب التي تملكها لا يدخل هنا إطلاقًا. */
+
+/* ---------- تصنيف اللعبة: تُختَم أم بلا نهاية؟ ----------
+   فيفا والأركيد لا نهاية لهما تُختَم، فقياسهما بالتختيم ظلم لهما.
+   يُشتقّ تلقائيًا ويقبل تجاوزًا يدويًا بحقل `endless` (true/false). */
+const ENDLESS_GENRES = ["sports", "party"];
+function isEndless(g) {
+  if (!g) return false;
+  if (g.endless === true) return true;
+  if (g.endless === false) return false;
+  if (g.arcadeMode) return true;
+  return ENDLESS_GENRES.some(k => hasGenre(g, k));
+}
+
+/* ---------- وسام اللعبة ----------
+   أربع درجات، آخرها لا نهائية. مساران بنفس الشكل والقيمة:
+   لعبة تُختَم وقودها التختيمات، ولعبة بلا نهاية وقودها الساعات. */
+const MEDAL_RUNS = [3, 1, 0];          // أتقنتها · أتممتها · خُضتها (بالتختيمات)
+const MEDAL_HOURS_ENDLESS = [100, 25, 5];
+const MEDAL_MIN_HOURS = 5;             // «خُضتها» عتبةُ وقت في المسارين
+const MEDALS_RUN = [
+  { k: "mastered", icon: "🥇", name: "أتقنتها", pts: 400 },
+  { k: "beaten",   icon: "🥈", name: "أتممتها", pts: 150 },
+  { k: "played",   icon: "🥉", name: "خُضتها",  pts: 50 }
+];
+const MEDALS_ENDLESS = [
+  { k: "mastered", icon: "🥇", name: "أدمنتها", pts: 400 },
+  { k: "beaten",   icon: "🥈", name: "لازمتها", pts: 150 },
+  { k: "played",   icon: "🥉", name: "خُضتها",  pts: 50 }
+];
+const GILD_PTS = 300;
+
+/* عدد التختيمات الكاملة للعبة (لا يشمل تختيمات الأجزاء والأهداف — هذه لِلّعبة نفسها) */
+const fullRuns = g => ((g && g.playthroughs) || []).length;
+
+/* يرجع { tier, key, icon, name, gild, pts, next } — أو tier:0 إن لم تبلغ شيئًا.
+   `gild` عدد التذهيبات: كل 3 تختيمات إضافية، أو كل 100 ساعة إضافية. */
+function gameMedal(g) {
+  if (!g) return { tier: 0, gild: 0, pts: 0 };
+  const endless = isEndless(g);
+  const hrs = Math.max(0, realPlayHours(g));
+  const set = endless ? MEDALS_ENDLESS : MEDALS_RUN;
+  const val = endless ? hrs : fullRuns(g);
+  const steps = endless ? MEDAL_HOURS_ENDLESS : MEDAL_RUNS;
+  /* «خُضتها» تحتاج ساعات في المسارين — لعبة بتختيمة وبلا وقت مسجّل ما زالت تُتمّ */
+  let tier = 0;
+  if (val >= steps[0]) tier = 3;
+  else if (val >= steps[1] && (!endless ? true : hrs >= MEDAL_MIN_HOURS)) tier = 2;
+  else if (hrs >= MEDAL_MIN_HOURS) tier = 1;
+  if (tier === 0) return { tier: 0, gild: 0, pts: 0, endless: endless };
+  const m = set[3 - tier];
+  /* التذهيب يبدأ بعد بلوغ الإتقان */
+  const gild = tier < 3 ? 0 : endless
+    ? Math.floor((hrs - MEDAL_HOURS_ENDLESS[0]) / MEDAL_HOURS_ENDLESS[0])
+    : Math.floor((val - MEDAL_RUNS[0]) / MEDAL_RUNS[0]);
+  const pts = set.slice(3 - tier).reduce((s, x) => s + x.pts, 0) + gild * GILD_PTS;
+  return { tier: tier, key: m.k, icon: m.icon, name: m.name, gild: gild, pts: pts, endless: endless };
+}
+
+/* ---------- دورة الإتقان ----------
+   كل تختيمة تُغلق دورة وتفتح التالية، وساعات الدورة الجديدة تعطي مِرانًا أعلى.
+   هذا هو السبب الذي يجعلك تعود للعبة ختمتها بدل الانتقال لغيرها.
+   الألعاب بلا نهاية دورتها واحدة دائمًا — لا تختيم فيها يفتح دورة. */
+const CYCLE_STEP = 0.25;
+const cycleOf = g => isEndless(g) ? 1 : fullRuns(g) + 1;
+const cycleMult = g => 1 + CYCLE_STEP * (cycleOf(g) - 1);
+/* توزيع ساعاتك على الدورات: الجلسة تنتمي للدورة التي كانت مفتوحة وقتها،
+   والدورة تُفتح بالتختيمة التي سبقتها. هذا يمنع ضرب ساعات الماضي بمضاعف
+   الحاضر — من ختم لعبة أمس لا تتضاعف ساعاته القديمة بأثر رجعي. */
+function cycleHours(g) {
+  if (!g) return [];
+  const hrs = Math.max(0, realPlayHours(g));
+  if (isEndless(g)) return hrs > 0 ? [{ cycle: 1, hours: hrs }] : [];
+  const runs = ((g.playthroughs || [])
+    .map(r => (r && r.date) ? (Date.parse(r.date + "T23:59:59") || 0) : 0)
+    .filter(Boolean)).sort((a, b) => a - b);
+  const by = {};
+  for (const sx of (g.sessions || [])) {
+    if (!sx || sx.src === "backfill" || !sx.at) continue;
+    const t = Date.parse(sx.at) || 0;
+    if (!t) continue;
+    let done = 0;
+    for (const r of runs) { if (r <= t) done++; else break; }
+    const c = done + 1;
+    by[c] = (by[c] || 0) + Math.max(0, Number(sx.ms) || 0) / 3600000;
+  }
+  return Object.keys(by).map(c => ({ cycle: Number(c), hours: by[c] })).sort((a, b) => a.cycle - b.cycle);
+}
+/* الساعات بعد وزنها بمضاعف دورتها — هذه ما يدخل نقاط الخبرة */
+const cycleXpHours = g => cycleHours(g).reduce((t, x) => t + x.hours * (1 + CYCLE_STEP * (x.cycle - 1)), 0);
+
+/* ---------- وسم السَّحب ----------
+   لعبة أعطيتها ساعةً فأكثر ثم لم تلمسها شهرًا. اسم الوسم يتحدّد بكم أعطيتها
+   لا بكم غبت: ساعتان تُنسى، وأربعون ساعة لا تُنسى.
+   ⚠️ الألعاب المختومة والتي بلا نهاية لا تُوسَم — لا سَحبَ على ما أتممته. */
+const GHOST_MIN_HOURS = 1;
+const GHOST_DAYS = [365, 180, 30];     // سنة · ٦ أشهر · شهر
+const GHOST_NAMES = [
+  /* [ساعات_من, بعد شهر, بعد ٦ أشهر, بعد سنة] */
+  [30, ["🗡️", "الخيانة العظمى"], ["🗡️", "وكنتَ صاحبها"],     ["🏚️", "بيت مهجور"]],
+  [10, ["💔", "خيانة"],          ["💔", "خيانة موصوفة"],      ["⚰️", "دفنتها وهي حيّة"]],
+  [3,  ["👻", "الساحب"],          ["👻", "الساحب المزمن"],     ["💀", "سحبة العمر"]],
+  [0,  ["🤷", "ما ضبطت"],         ["🌫️", "راحت بلا رجعة"],    ["🪦", "نسيت إن عندك إياها"]]
+];
+/* تحوّل الوسم حين تعود وتختمها — لا يُمحى بل يحمل معه كم غِبت */
+const REDEEM_NAMES = [
+  [730, ["🏆", "قصّة حبّ متأخّرة"]],
+  [365, ["💍", "صالحتها بعد سنة"]],
+  [180, ["❤️", "حبّيتها بعد ما سحبت عليها"]],
+  [30,  ["💚", "رجعت لها"]]
+];
+const daysBetween = (a, b) => Math.floor((b - a) / 86400000);
+
+/* يرجع null، أو { state:"ghost"|"redeemed", icon, name, days, hours }.
+   `now` معطًى صراحةً حتى تكون الدالة خالصة وقابلة للاختبار. */
+function ghostTag(g, now) {
+  if (!g || isEndless(g)) return null;
+  const hrs = Math.max(0, realPlayHours(g));
+  if (hrs < GHOST_MIN_HOURS) return null;
+  const t = now == null ? Date.now() : (now instanceof Date ? +now : now);
+  const last = Date.parse(g.lastPlayed || "") || 0;
+  if (!last) return null;
+
+  const runs = (g.playthroughs || []).filter(r => r && r.date);
+  if (runs.length) {
+    /* عادت وخُتمت: نقيس الفجوة بين آخر لعب قبل التختيمة وتاريخ التختيمة نفسها */
+    const runAt = Math.max(...runs.map(r => Date.parse(r.date + "T12:00:00") || 0));
+    const before = (g.sessions || [])
+      .map(s => (s && s.at && s.src !== "backfill") ? Date.parse(s.at) || 0 : 0)
+      .filter(v => v > 0 && v < runAt - 86400000);
+    if (before.length) {
+      const gap = daysBetween(Math.max(...before), runAt);
+      const hit = REDEEM_NAMES.find(r => gap >= r[0]);
+      if (hit) return { state: "redeemed", icon: hit[1][0], name: hit[1][1], days: gap, hours: hrs };
+    }
+    return null;   /* مختومة بلا هجر يستحق الذكر */
+  }
+
+  const gone = daysBetween(last, t);
+  if (gone < GHOST_DAYS[2]) return null;
+  const col = gone >= GHOST_DAYS[0] ? 3 : gone >= GHOST_DAYS[1] ? 2 : 1;
+  const row = GHOST_NAMES.find(r => hrs >= r[0]) || GHOST_NAMES[GHOST_NAMES.length - 1];
+  return { state: "ghost", icon: row[col][0], name: row[col][1], days: gone, hours: hrs };
+}
+
 function baseXp(games) {
   let xp = 0;
   for (const g of (games || [])) {
     // نقاط وجود اللعبة حسب النوع: محاكي/NSO = 1، رقمية = 5، ديسك = 10
     // غلاف المجموعة منتَج لا لعبة → لا نقاط اقتناء له (ألعابه الداخلية تُحتسب)
     if (!isShell(g)) xp += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
-    xp += XP_PER_HOUR * Math.max(0, realPlayHours(g)); // نقاط ساعات اللعب الحقيقية
+    /* ساعات موزونة بدورتها: العودة للعبة ختمتها تعطي أكثر — وهذا هو السبب
+       الذي يجعلك تعود. ⚠️ مكرَّر في شاشة «مصادر نقاط الخبرة». */
+    xp += XP_PER_HOUR * Math.max(0, cycleXpHours(g));
     xp += raGamePoints(g); // نقاط إنجازات RA (0 لغير المرتبطة) — ⚠️ مكرَّر في شاشة «مصادر نقاط الخبرة»
     const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
     runs.forEach((r, i) => {
@@ -2586,7 +2736,18 @@ const GameCard = React.memo(function GameCard({
       className: "card-runs",
       title: "عدد التختيمات"
     }, "🏆", rc > 1 ? "×" + rc : "") : null;
-  })(), game.subscription === "gamepass" && /*#__PURE__*/React.createElement("span", {
+  })(),
+  /* وسام المِران: درجة اللعبة وتذهيباتها. يُحسب من الساعات والتختيمات
+     ولا يحتاج أي حقل مخزَّن — راجع gameMedal. */
+  (() => {
+    const m = gameMedal(game);
+    if (!m.tier) return null;
+    return /*#__PURE__*/React.createElement("span", {
+      className: "card-medal" + (m.gild ? " gild" : ""),
+      title: m.name + (m.gild ? " • مُذهّبة ×" + m.gild : "")
+    }, m.icon, m.gild ? "✨" + m.gild : "");
+  })(),
+  game.subscription === "gamepass" && /*#__PURE__*/React.createElement("span", {
     className: "card-sub gamepass",
     title: "Xbox Game Pass"
   }, "Game Pass"), game.subscription === "psplus" && /*#__PURE__*/React.createElement("span", {
@@ -2598,7 +2759,18 @@ const GameCard = React.memo(function GameCard({
     className: "card-body"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-name"
-  }, game.name, game.displayType === "crt" && " 📺"), bundleCount > 0 && /*#__PURE__*/React.createElement("div", {
+  }, game.name, game.displayType === "crt" && " 📺"),
+  /* وسم السَّحب — حالة على البطاقة لا إشعارًا، فمكتبة كبيرة لا تُغرقك بمئات
+     التنبيهات أول مرة. يتحوّل من هجر إلى مصالحة حين تعود وتختمها. */
+  (() => {
+    const t = ghostTag(game);
+    if (!t) return null;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "card-ghost" + (t.state === "redeemed" ? " back" : ""),
+      title: t.state === "redeemed" ? "عدت لها بعد " + t.days + " يومًا" : "آخر لعب قبل " + t.days + " يومًا"
+    }, t.icon, " ", t.name);
+  })(),
+  bundleCount > 0 && /*#__PURE__*/React.createElement("div", {
     className: "card-grp",
     title: "لعبة تحتوي ألعابًا داخلية"
   }, "🗂️ ", bundleCount === 1 ? "تحتوي لعبة داخلية" : bundleCount === 2 ? "تحتوي لعبتين داخليتين" : "تحتوي " + bundleCount + " ألعاب داخلية"), game.group && /*#__PURE__*/React.createElement("div", {
@@ -3624,7 +3796,37 @@ function GameDetail({
           } }, sx.note ? "✎" : "📝")),
         sx.note && /*#__PURE__*/React.createElement("div", { className: "sess-note" }, sx.note)))),
       sess.length > 8 && /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => setSessOpen(o => !o) }, sessOpen ? "إخفاء" : "عرض كل الجلسات (" + sess.length + ")"));
-  })(), (() => { const p = predictFinish(game, allGames); return p ? /*#__PURE__*/React.createElement("div", { className: "pred-box" }, p) : null; })(), Number(game.rating) > 0 && /*#__PURE__*/React.createElement(Stars, {
+  })(),
+  /* ===== وسام المِران ودورة اللعبة ووسم السَّحب ===== */
+  (() => {
+    const m = gameMedal(game);
+    const t = ghostTag(game);
+    const cyc = cycleOf(game);
+    if (!m.tier && !t) return null;
+    const endless = m.endless;
+    return /*#__PURE__*/React.createElement("div", { className: "plat-box" },
+      /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "🎖️ وسام المِران"),
+      /*#__PURE__*/React.createElement("div", { className: "medal-row" },
+        m.tier ? /*#__PURE__*/React.createElement("div", { className: "medal-big" + (m.gild ? " gild" : "") },
+          /*#__PURE__*/React.createElement("span", { className: "mb-ic" }, m.icon),
+          /*#__PURE__*/React.createElement("div", { className: "mb-i" },
+            /*#__PURE__*/React.createElement("b", null, m.name, m.gild ? " ✨×" + m.gild : ""),
+            /*#__PURE__*/React.createElement("small", null, m.pts, " مِران"))) : null,
+        !endless && cyc > 1 && /*#__PURE__*/React.createElement("span", { className: "cycle-chip" },
+          "🔁 الدورة ", cyc, " • ساعاتك الآن ×", (1 + CYCLE_STEP * (cyc - 1)).toFixed(2).replace(/0$/, "")),
+        endless && /*#__PURE__*/React.createElement("span", { className: "cycle-chip" },
+          "♾️ بلا نهاية — الوقت هو الفيصل")),
+      t && /*#__PURE__*/React.createElement("div", {
+        className: "ghost-big" + (t.state === "redeemed" ? " back" : ""), style: { marginTop: 8 }
+      },
+        /*#__PURE__*/React.createElement("span", { className: "gb-ic" }, t.icon),
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("b", null, t.name),
+          /*#__PURE__*/React.createElement("div", null, t.state === "redeemed"
+            ? "عدت لها بعد " + t.days + " يومًا وختمتها"
+            : "آخر مرة لعبتها قبل " + t.days + " يومًا — و" + fmtHours(t.hours) + " فيها"))));
+  })(),
+  (() => { const p = predictFinish(game, allGames); return p ? /*#__PURE__*/React.createElement("div", { className: "pred-box" }, p) : null; })(), Number(game.rating) > 0 && /*#__PURE__*/React.createElement(Stars, {
     value: Number(game.rating),
     size: 16
   }), /*#__PURE__*/React.createElement("div", {
@@ -6531,7 +6733,17 @@ function InsightsView({
     const mmap = {};
     games.forEach(g => {
       if (!isShell(g)) exist += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
-      (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill" && sx.at) { const v = XP_PER_HOUR * (Number(sx.ms) || 0) / 3600000; hxp += v; const mk = localMonth(sx.at); mmap[mk] = (mmap[mk] || 0) + v; } });
+      /* ⚠️ يطابق سطر baseXp: الساعات موزونة بمضاعف دورتها لا خامًا */
+      { const mult = {}; cycleHours(g).forEach(x => { mult[x.cycle] = 1 + CYCLE_STEP * (x.cycle - 1); });
+        const runsT = ((g.playthroughs || []).map(r => (r && r.date) ? (Date.parse(r.date + "T23:59:59") || 0) : 0).filter(Boolean)).sort((a, b) => a - b);
+        (g.sessions || []).forEach(sx => {
+          if (!sx || sx.src === "backfill" || !sx.at) return;
+          const t = Date.parse(sx.at) || 0; if (!t) return;
+          let done = 0; for (const r of runsT) { if (r <= t) done++; else break; }
+          const m = isEndless(g) ? 1 : (1 + CYCLE_STEP * done);
+          const v = XP_PER_HOUR * (Number(sx.ms) || 0) / 3600000 * m;
+          hxp += v; const mk = localMonth(sx.at); mmap[mk] = (mmap[mk] || 0) + v;
+        }); }
       const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
       runs.forEach((r, i) => {
         const base = i === 0 ? 100 : 150, L = Math.max(0, Number(r.hours) || 0);
@@ -9695,6 +9907,53 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 /* ===== إنجازات RetroAchievements: التكرار والربط اليدوي =====
    ملاحظة: هذه كلها حاويات عمودية أو صفوف مستقلة — لا تستخدم .track لأي منها،
    فهي flex صف وتسحق الأعمدة حتى يظهر النص حرفًا في كل سطر (خطأ ٥ في AGENTS.md). */
+/* ===== نظام المِران: وسام اللعبة ووسم السَّحب =====
+   ⚠️ لا تستخدم .track لأي حاوية هنا — هي flex صف وتسحق الأعمدة (خطأ ٥). */
+.card-medal{
+  position:absolute; top:6px; inset-inline-start:6px; z-index:3;
+  display:inline-flex; align-items:center; gap:1px;
+  font-size:12px; font-weight:800; font-family:var(--num);
+  padding:2px 6px; border-radius:8px; line-height:1.4;
+  background:rgba(10,12,20,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  border:1px solid rgba(255,255,255,.14); color:#fff;
+}
+.card-medal.gild{
+  background:rgba(245,185,66,.92); color:#231a05;
+  border-color:rgba(255,255,255,.4);
+  box-shadow:0 0 10px rgba(245,185,66,.5);
+}
+/* وسم السَّحب — نبرة ساخرة من الذات لا تأنيب، فالألوان هادئة لا حمراء صارخة */
+.card-ghost{
+  margin-top:3px; font-size:10.5px; font-weight:700; line-height:1.5;
+  color:var(--txt-4); display:flex; align-items:center; gap:3px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.card-ghost.back{ color:#4ade80; }
+/* صفّ الوسام في صفحة اللعبة */
+.medal-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.medal-big{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:9px 14px; border-radius:var(--r2);
+  border:1px solid var(--hair); background:var(--e1);
+}
+.medal-big.gild{ border-color:rgba(245,185,66,.45); background:rgba(245,185,66,.1); }
+.medal-big .mb-ic{ font-size:22px; line-height:1; }
+.medal-big .mb-i{ display:flex; flex-direction:column; gap:1px; }
+.medal-big .mb-i b{ font-size:13.5px; }
+.medal-big .mb-i small{ font-size:10.5px; color:var(--txt-4); }
+.medal-big.gild .mb-i b{ color:#f5b942; }
+.cycle-chip{
+  font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px;
+  background:rgba(167,139,250,.12); color:#a78bfa; border:1px solid rgba(167,139,250,.3);
+}
+.ghost-big{
+  display:flex; align-items:center; gap:9px; padding:10px 13px;
+  border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1);
+  font-size:12.5px; color:var(--txt-2);
+}
+.ghost-big.back{ border-color:rgba(74,222,128,.35); background:rgba(74,222,128,.08); }
+.ghost-big .gb-ic{ font-size:19px; line-height:1; flex:none; }
+.ghost-big b{ font-size:13.5px; color:var(--txt-1); }
 /* ===== مُبدِّل عالمَي المكتبة =====
    حاويات عمودية — لا تستخدم .track هنا (خطأ ٥: هي flex صف وتسحق الأعمدة). */
 .scopebar{ margin:10px 0 6px; display:flex; flex-direction:column; gap:8px; }

@@ -320,8 +320,119 @@ eq(C.TRACKS.filter(t => C.computeTrack(t, []).cleared > 0).map(t => t.id), [],
 noThrow(() => C.computeAchievements([]), "computeAchievements على مكتبة فارغة");
 noThrow(() => C.computeAchievements([{}]), "computeAchievements على لعبة فارغة");
 
-/* ═══════════ ⑧ عالما المكتبة (النطاق والرتب) ═══════════ */
-G("⑧ عالما المكتبة");
+/* ═══════════ ⑧ نظام المِران: الأوسمة والدورة ووسم السَّحب ═══════════ */
+G("⑧ نظام المِران");
+{
+  const run = (h, runs) => game({
+    hours: h, genre: "Action",
+    sessions: h ? [sess("2026-08-01", h)] : [],
+    playthroughs: Array.from({ length: runs || 0 }, (_, i) => ({ date: "2026-08-0" + (i + 1), n: i + 1 }))
+  });
+  const med = g => { const m = C.gameMedal(g); return m.tier ? m.name + (m.gild ? "✨" + m.gild : "") : "—"; };
+
+  ok(!C.isEndless(run(10, 1)), "لعبة أكشن تُختَم");
+  ok(C.isEndless(game({ genre: "Sports" })), "الرياضة بلا نهاية");
+  ok(C.isEndless(game({ arcadeMode: true })), "الأركيد بلا نهاية");
+  ok(!C.isEndless(game({ genre: "Sports", endless: false })), "التجاوز اليدوي endless:false يُحترم");
+  ok(C.isEndless(game({ genre: "Action", endless: true })), "التجاوز اليدوي endless:true يُحترم");
+
+  eq(med(run(2, 0)), "—", "ساعتان بلا تختيم ⇒ بلا وسام");
+  eq(med(run(6, 0)), "خُضتها", "٥ ساعات فأكثر ⇒ خُضتها");
+  eq(med(run(10, 1)), "أتممتها", "تختيمة واحدة ⇒ أتممتها");
+  eq(med(run(30, 3)), "أتقنتها", "٣ تختيمات ⇒ أتقنتها");
+  eq(med(run(60, 6)), "أتقنتها✨1", "٦ تختيمات ⇒ تذهيبة");
+  eq(med(run(90, 9)), "أتقنتها✨2", "٩ تختيمات ⇒ تذهيبتان");
+  eq(C.gameMedal(run(30, 3)).pts, 600, "مِران الإتقان = 50+150+400");
+  eq(C.gameMedal(run(60, 6)).pts, 900, "كل تذهيبة تضيف 300");
+
+  const sport = h => game({ genre: "Sports", hours: h, sessions: [sess("2026-08-01", h)] });
+  eq(med(sport(2)), "—", "رياضة ساعتان ⇒ بلا وسام");
+  eq(med(sport(30)), "لازمتها", "٢٥ ساعة رياضة ⇒ لازمتها");
+  eq(med(sport(120)), "أدمنتها", "١٠٠ ساعة رياضة ⇒ أدمنتها");
+  eq(med(sport(250)), "أدمنتها✨1", "٢٠٠ ساعة ⇒ تذهيبة — الوقت وحده هو الفيصل");
+  eq(C.gameMedal(sport(120)).pts, C.gameMedal(run(30, 3)).pts, "المساران متساويان في القيمة");
+
+  eq(C.cycleMult(run(10, 0)), 1, "الدورة الأولى بلا مضاعف");
+  eq(C.cycleMult(run(10, 1)), 1.25, "بعد أول تختيمة ⇒ ×1.25");
+  eq(C.cycleMult(run(10, 4)), 2, "بعد أربع تختيمات ⇒ ×2");
+  eq(C.cycleMult(sport(100)), 1, "اللعبة بلا نهاية دورتها واحدة دائمًا");
+}
+{
+  /* توزيع الساعات على الدورات — الجلسة تنتمي للدورة المفتوحة وقتها.
+     ⚠️ الفخّ: ضرب ساعات الماضي بمضاعف الحاضر يضخّم رصيدك بأثر رجعي
+     لمجرّد أنك ختمت اللعبة أمس. */
+  const spread = game({
+    genre: "Action", hours: 30,
+    sessions: [sess("2026-01-10", 10), sess("2026-03-10", 10), sess("2026-05-10", 10)],
+    playthroughs: [{ date: "2026-02-01", hours: 10, n: 1 }, { date: "2026-04-01", hours: 10, n: 2 }]
+  });
+  eq(C.cycleHours(spread).map(x => [x.cycle, x.hours]), [[1, 10], [2, 10], [3, 10]],
+    "كل جلسة تُنسب لدورتها الصحيحة");
+  eq(C.cycleXpHours(spread), 37.5, "الساعات الموزونة = 10×1 + 10×1.25 + 10×1.5");
+
+  const allBefore = game({
+    genre: "Action", hours: 30, sessions: [sess("2026-01-10", 30)],
+    playthroughs: [{ date: "2026-06-01", hours: 30, n: 1 }]
+  });
+  eq(C.cycleXpHours(allBefore), 30, "ساعات سبقت التختيمة لا تتضاعف بأثر رجعي");
+
+  eq(C.cycleXpHours(game({ genre: "Sports", hours: 100, sessions: [sess("2026-01-10", 100)] })), 100,
+    "اللعبة بلا نهاية لا مضاعف لها");
+  eq(C.cycleXpHours(game({ genre: "Action", hours: 5, sessions: [sess("2026-01-10", 5, "backfill")] })), 0,
+    "الوقت التعويضي مستثنى من الدورات كما هو مستثنى من XP");
+  noThrow(() => C.cycleHours(null), "cycleHours(null) لا ينهار");
+  noThrow(() => C.cycleHours(game({ playthroughs: [{ n: 1 }] })), "تختيمة بلا تاريخ لا تُسقط الحساب");
+
+  ok(C.baseXp([spread]) > C.baseXp([allBefore]),
+    "إعادة اللعب تعطي خبرة أعلى من نفس الساعات بلا إعادة");
+}
+{
+  /* وسم السَّحب — الساعات تحدّد الاسم والمدّة تصعّده */
+  const NOW = Date.parse("2026-08-23T12:00:00Z");
+  const ago = d => new Date(NOW - d * 86400000).toISOString();
+  const ghosted = (h, days) => game({
+    genre: "Action", hours: h, lastPlayed: ago(days),
+    sessions: [{ at: ago(days), ms: h * 3600000, src: "timer" }]
+  });
+  const nm = g => { const t = C.ghostTag(g, NOW); return t ? t.name : "—"; };
+
+  eq(nm(ghosted(0.5, 45)), "—", "أقل من ساعة لا تُوسَم — لم تستثمر فيها شيئًا");
+  eq(nm(ghosted(6, 10)), "—", "قبل شهر لا وسم");
+  eq(nm(ghosted(2, 45)), "ما ضبطت", "ساعتان ⇒ ما ضبطت");
+  eq(nm(ghosted(6, 45)), "الساحب", "٦ ساعات ⇒ الساحب");
+  eq(nm(ghosted(20, 45)), "خيانة", "٢٠ ساعة ⇒ خيانة");
+  eq(nm(ghosted(45, 45)), "الخيانة العظمى", "٤٥ ساعة ⇒ الخيانة العظمى");
+  eq(nm(ghosted(6, 200)), "الساحب المزمن", "٦ أشهر تصعّد الاسم");
+  eq(nm(ghosted(6, 400)), "سحبة العمر", "سنة تصعّده أكثر");
+  eq(nm(game({ genre: "Sports", hours: 50, lastPlayed: ago(300), sessions: [{ at: ago(300), ms: 180000000, src: "timer" }] })), "—",
+    "لعبة بلا نهاية لا تُسحَب — لا تختيم فيها أصلًا");
+
+  /* التحوّل: عادت وخُتمت بعد هجر */
+  const redeemed = gap => {
+    const runDate = new Date(NOW - 5 * 86400000).toISOString().slice(0, 10);
+    return game({
+      genre: "Action", hours: 12, lastPlayed: ago(5),
+      sessions: [{ at: ago(5 + gap), ms: 8 * 3600000, src: "timer" }, { at: ago(5), ms: 4 * 3600000, src: "timer" }],
+      playthroughs: [{ date: runDate, n: 1 }]
+    });
+  };
+  eq(nm(redeemed(40)), "رجعت لها", "عودة بعد شهر");
+  eq(nm(redeemed(200)), "حبّيتها بعد ما سحبت عليها", "عودة بعد ٦ أشهر");
+  eq(nm(redeemed(400)), "صالحتها بعد سنة", "عودة بعد سنة");
+  eq(nm(redeemed(800)), "قصّة حبّ متأخّرة", "عودة بعد سنتين");
+  ok(C.ghostTag(redeemed(400), NOW).state === "redeemed", "الوسم يتحوّل ولا يُمحى");
+  eq(nm(game({ genre: "Action", hours: 10, lastPlayed: ago(300),
+    sessions: [{ at: ago(310), ms: 36000000, src: "timer" }],
+    playthroughs: [{ date: "2025-10-27", n: 1 }] })), "—",
+    "مختومة بلا هجر سابق ⇒ بلا وسم");
+
+  noThrow(() => C.ghostTag(null, NOW), "ghostTag(null) لا ينهار");
+  noThrow(() => C.gameMedal(null), "gameMedal(null) لا ينهار");
+  noThrow(() => C.gameMedal({}), "gameMedal على لعبة فارغة لا ينهار");
+}
+
+/* ═══════════ ⑨ عالما المكتبة (النطاق والرتب) ═══════════ */
+G("⑨ عالما المكتبة");
 {
   const orig = game({ id: "o", hardware: "original", type: "physical", hours: 5,
     sessions: [sess("2026-08-01", 5)], playthroughs: [{ date: "2026-08-01", hours: 5, n: 1 }] });
@@ -360,8 +471,8 @@ G("⑧ عالما المكتبة");
   eq(C.rankOn(L, "abc").name, "أ", "نتيجة غير رقمية تُعامَل صفرًا");
 }
 
-/* ═══════════ ⑨ اتساق الإجمالي ═══════════ */
-G("⑨ اتساق نقاط الخبرة الكلية");
+/* ═══════════ ⑩ اتساق الإجمالي ═══════════ */
+G("⑩ اتساق نقاط الخبرة الكلية");
 {
   /* شاشة «مصادر نقاط الخبرة» تعرض بنودًا يجب أن تجمع إلى totalXp بالضبط.
      كان بندا التحديات والسلسلة غائبين، فظهر فارق غير مفسَّر تحت المستوى. */
