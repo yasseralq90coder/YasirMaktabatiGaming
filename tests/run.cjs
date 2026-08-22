@@ -155,6 +155,62 @@ eq(C.raGamePoints(raGame({ raHist: { v: 1, seededAt: "x", ach: { "1": { times: 2
 }
 
 {
+  /* Softcore مقابل Hardcore: RA يسجّل تاريخين منفصلين لكل إنجاز، وكسبه سوفت كور
+     ثم إعادته هاردكور كسبتان يعترف بهما RA نفسه. لكن الفتح المباشر في هاردكور
+     يضع التاريخين **متطابقين** — عدّهما كسبتين يضاعف كل إنجاز هاردكور. */
+  const ach = (soft, hard) => ({
+    id: 1, title: "A", points: 5,
+    earned: !!(soft || hard), hardcore: !!hard,
+    dateSoft: soft || "", dateHard: hard || "", date: hard || soft || ""
+  });
+  const prog = a => ({
+    numAwarded: a.earned ? 1 : 0, numAchievements: 1,
+    numAwardedHardcore: a.hardcore ? 1 : 0, achievements: [a]
+  });
+  const rec = h => h.ach["1"] || {};
+
+  {
+    const h = C.raMergeHistory(null, null, prog(ach("2020-01-01 10:00:00", "2020-01-01 10:00:00"))).hist;
+    eq(rec(h).times, 1, "فتح هاردكور مباشر (التاريخان متطابقان) ⇒ كسبة واحدة لا كسبتان");
+    eq(rec(h).hcTimes, 1, "ويُوسَم هاردكور");
+  }
+  {
+    const soft = ach("2020-01-01 10:00:00", "");
+    const a = C.raMergeHistory(null, null, prog(soft));
+    eq(rec(a.hist).times, 1, "سوفت كور وحده ⇒ كسبة واحدة");
+    eq(rec(a.hist).hcTimes, 0, "بلا وسم هاردكور");
+    const both = ach("2020-01-01 10:00:00", "2026-08-01 12:00:00");
+    const b = C.raMergeHistory(a.hist, prog(soft), prog(both));
+    eq(rec(b.hist).times, 2, "إعادته هاردكور بيوم مختلف ⇒ كسبة ثانية");
+    eq(rec(b.hist).hcTimes, 1, "الكسبة الثانية هاردكور");
+    eq(rec(b.hist).dates, ["2020-01-01", "2026-08-01"], "اليومان محفوظان");
+    eq(rec(b.hist).hcDates, ["2026-08-01"], "يوم الهاردكور معلَّم للعرض");
+    eq([b.newEarns, b.reEarns], [0, 1], "تُحسب إعادة كسب لا كسبة جديدة");
+    const c = C.raMergeHistory(b.hist, prog(both), prog(both));
+    eq(rec(c.hist).times, 2, "إعادة المزامنة لا تُنجرف");
+    const d = C.raMergeHistory(c.hist, prog(both), prog(both));
+    eq(rec(d.hist).times, 2, "ولا في الثالثة");
+  }
+  {
+    const h = C.raMergeHistory(null, null, prog(ach("2020-01-01 10:00:00", "2026-08-01 12:00:00")));
+    eq(rec(h.hist).times, 2, "التاريخان في أول مزامنة ⇒ كسبتان فورًا");
+    eq([h.newEarns, h.reEarns], [1, 1], "واحدة جديدة وواحدة معادة");
+  }
+  {
+    /* سجلّ قديم كُتب قبل فصل التاريخين: للإنجاز `date` وحده */
+    const legacy = { id: 1, title: "A", points: 5, earned: true, hardcore: true, date: "2019-05-05 10:00:00" };
+    const h = C.raMergeHistory(null, null, { numAwarded: 1, numAchievements: 1, numAwardedHardcore: 1, achievements: [legacy] }).hist;
+    eq(rec(h).times, 1, "البيانات القديمة (date وحده) ما زالت تُقرأ");
+    eq(rec(h).dates, ["2019-05-05"], "وتاريخها محفوظ");
+  }
+  {
+    const noDate = { id: 1, title: "A", points: 5, earned: true, hardcore: false };
+    const h = C.raMergeHistory(null, null, { numAwarded: 1, numAchievements: 1, numAwardedHardcore: 0, achievements: [noDate] }).hist;
+    eq(rec(h).times, 1, "إنجاز محصَّل بلا أي تاريخ يُعدّ مرة واحدة ولا يضيع");
+  }
+}
+
+{
   /* المطابقة التلقائية للربط الجماعي — تامّة فقط عمدًا.
      المطابقة الجزئية تربط "Sonic" بـ"Sonic 3D Blast" فتسحب إنجازات لعبة أخرى
      وتلوّث سجل التكرار بلا أي خطأ ظاهر. */

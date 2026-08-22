@@ -2023,7 +2023,12 @@ async function raGameProgress(gameId, user, key) {
       badge: a.BadgeName || a.badgeName || "",
       earned: !!(a.DateEarned || a.DateEarnedHardcore),
       hardcore: !!a.DateEarnedHardcore,
-      date: a.DateEarnedHardcore || a.DateEarned || "",
+      /* تاريخان منفصلان: RA يسجّل السوفت كور والهاردكور كلًّا على حدة، وكسبك
+         الإنجاز سوفت كور ثم إعادته هاردكور كسبتان يعترف بهما RA نفسه. كان
+         `date` وحده يرمي السوفت كور فتضيع الكسبة الأولى بتاريخها. */
+      dateSoft: a.DateEarned || "",
+      dateHard: a.DateEarnedHardcore || "",
+      date: a.DateEarnedHardcore || a.DateEarned || "",   /* للتوافق مع البيانات القديمة */
       order: Number(a.DisplayOrder || a.displayOrder) || 0
     };
   }).sort((x, y) => x.order - y.order || x.id - y.id);
@@ -2068,7 +2073,7 @@ function raBaseTitle(t) {
    قاعدة العدّ: الإنجاز محصَّل الآن ويحمل تاريخًا لم نسجّله من قبل ⇒ مرة جديدة.
    حدّها المعروف: لو تكرّر إنجازان في نفس اليوم لا يمكن تمييزهما — مقبول.
    السجل يبدأ من أول مزامنة بعد هذا الإصدار؛ ما قبله يُبذَّر كمرة واحدة. */
-const RA_HIST_V = 1;
+const RA_HIST_V = 2;   /* v2: أُضيف hcDates وفُصل تاريخا السوفت/الهارد كور */
 const raEmptyHist = () => ({ v: RA_HIST_V, ach: {}, masteries: [], resets: [], seededAt: "" });
 function raMergeHistory(prevHist, prevRa, nextRa) {
   const base = prevHist && prevHist.ach ? prevHist : raEmptyHist();
@@ -2084,19 +2089,48 @@ function raMergeHistory(prevHist, prevRa, nextRa) {
   for (const a of nextRa.achievements || []) {
     if (!a || !a.earned) continue;
     const id = String(a.id);
-    const day = String(a.date || "").slice(0, 10);
     const prev = h.ach[id];
-    const dates = prev && Array.isArray(prev.dates) ? prev.dates : [];
-    const times = prev ? Number(prev.times) || 0 : 0;
-    /* أول مرة نراه محصَّلًا، أو بتاريخ جديد لم نعدّه ⇒ مرة إضافية */
-    if (times > 0 && (!day || dates.includes(day))) continue;
+    const known = prev && Array.isArray(prev.dates) ? prev.dates.slice() : [];
+    const knownHc = prev && Array.isArray(prev.hcDates) ? prev.hcDates.slice() : [];
+    let times = prev ? Number(prev.times) || 0 : 0;
+    let hcTimes = prev ? Number(prev.hcTimes) || 0 : 0;
+    /* ⚠️ الفتح المباشر في هاردكور يضع التاريخين **متطابقين** في RA، فعدّهما
+       كسبتين يضاعف كل إنجاز هاردكور بلا سبب. نعدّ الأيام المتمايزة وحدها:
+       • سوفت كور ثم هاردكور بيومين مختلفين ⇒ كسبتان (وهو ما يعترف به RA)
+       • فتح هاردكور مباشر (اليومان متطابقان)  ⇒ كسبة واحدة، موسومة هاردكور */
+    const ds = String(a.dateSoft || "").slice(0, 10);
+    const dh = String(a.dateHard || "").slice(0, 10);
+    const days = [];
+    if (ds) days.push({ d: ds, hc: dh === ds });
+    if (dh && dh !== ds) days.push({ d: dh, hc: true });
+    /* بيانات قديمة محفوظة قبل فصل التاريخين: لها `date` وحده */
+    if (!days.length) {
+      const d0 = String(a.date || "").slice(0, 10);
+      if (d0) days.push({ d: d0, hc: !!a.hardcore });
+    }
+    let gained = 0;
+    for (const x of days) {
+      if (known.includes(x.d)) continue;
+      known.push(x.d);
+      times++; gained++;
+      if (x.hc && !knownHc.includes(x.d)) { knownHc.push(x.d); hcTimes++; }
+    }
+    /* محصَّل بلا أي تاريخ (بيانات ناقصة من RA) ⇒ كسبة واحدة حتى لا يضيع */
+    if (!days.length && times === 0) {
+      times = 1; gained = 1;
+      if (a.hardcore) hcTimes++;
+    }
+    if (!gained) continue;
     h.ach[id] = {
-      times: times + 1,
-      hcTimes: (prev ? Number(prev.hcTimes) || 0 : 0) + (a.hardcore ? 1 : 0),
-      dates: day && !dates.includes(day) ? [...dates, day].sort() : dates,
+      times: times,
+      hcTimes: hcTimes,
+      dates: known.sort(),
+      hcDates: knownHc.sort(),
       title: a.title || (prev && prev.title) || ""
     };
-    if (times > 0) reEarns++; else newEarns++;
+    const before = times - gained;
+    if (before === 0) { newEarns++; reEarns += gained - 1; }
+    else reEarns += gained;
   }
   const prevAw = Number((prevRa || {}).numAwarded) || 0;
   const nextAw = Number(nextRa.numAwarded) || 0;
@@ -3757,7 +3791,10 @@ function GameDetail({
     const timesChip = a => {
       const n = raAchTimes(game, a.id);
       if (n <= 1) return null;
-      return /*#__PURE__*/React.createElement("span", { className: "ra-times", title: "حصلت عليه " + n + " مرات" }, "🔁 ×", n);
+      const rec = raAchRec(game, a.id);
+      const hc = rec ? Number(rec.hcTimes) || 0 : 0;
+      const tip = "كسبته " + n + " مرات" + (hc > 0 && hc < n ? " (منها " + hc + " هاردكور)" : "");
+      return /*#__PURE__*/React.createElement("span", { className: "ra-times", title: tip }, "🔁 ×", n);
     };
     return /*#__PURE__*/React.createElement("div", { className: "ra-box" },
       /*#__PURE__*/React.createElement("div", { className: "runs-head" },
@@ -3793,6 +3830,7 @@ function GameDetail({
         : /*#__PURE__*/React.createElement("div", { className: "ra-list" }, shown.map(a => {
             const rec = raAchRec(game, a.id);
             const dates = (rec && rec.dates) || [];
+            const hcDates = (rec && rec.hcDates) || [];
             return /*#__PURE__*/React.createElement("div", {
               key: a.id, className: "ra-item" + (a.earned ? " got" : "")
             },
@@ -3806,7 +3844,9 @@ function GameDetail({
               /*#__PURE__*/React.createElement("small", null, a.desc),
               a.earned
                 ? /*#__PURE__*/React.createElement("small", { className: "ra-date" },
-                    "✅ ", dates.length > 1 ? dates.join(" • ") : (dates[0] || String(a.date || "").slice(0, 10)))
+                    "✅ ", (dates.length ? dates : [String(a.date || "").slice(0, 10)])
+                      .filter(Boolean)
+                      .map(d => (hcDates.includes(d) ? "🔥 " : "") + d).join(" • "))
                 : /*#__PURE__*/React.createElement("a", {
                     className: "ra-guide", href: ra.guideUrl || raAchUrl(a.id),
                     target: "_blank", rel: "noopener noreferrer"
