@@ -5,7 +5,9 @@
    حين يكون التطبيق مثبَّتًا — ملاحظة: المتصفح هو من يقرر التوقيت الفعلي لها،
    لا يوجد ضمان دقيقة-بدقيقة بدون سيرفر Push حقيقي. */
 
-const CACHE_VERSION = "v1";
+/* ⚠️ ارفع هذا الرقم مع أي تغيير في الملفات المخزَّنة، وإلا بقي المستخدم على
+   نسخة قديمة: قاعدة activate تحذف كل كاش اسمه مختلف، فبلا تغيير الاسم لا يُحذف شيء. */
+const CACHE_VERSION = "v3";
 const CACHE_NAME = "gamelib-" + CACHE_VERSION;
 const SHELL_FILES = [
   "./",
@@ -18,7 +20,9 @@ const SHELL_FILES = [
 ];
 
 self.addEventListener("install", event => {
-  self.skipWaiting();
+  /* ⚠️ لا skipWaiting() هنا عمدًا. تفعيل النسخة الجديدة فورًا يعيد تحميل الصفحة
+     بلا إذن — وقد يقع ذلك وأنت في منتصف تأكيد وقت لعب فيضيع ما أدخلته.
+     تنتظر النسخة، ويظهر بانر، والتفعيل برسالة skip-waiting من الصفحة. */
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache =>
       Promise.all(SHELL_FILES.map(url => cache.add(url).catch(() => {})))
@@ -129,6 +133,9 @@ self.addEventListener("message", event => {
     scheduleNext();
   } else if (d.type === "timer-stop") {
     clearNag();
+  } else if (d.type === "skip-waiting") {
+    /* الصفحة طلبت تفعيل النسخة الجديدة فورًا بدل انتظار إغلاق كل التبويبات */
+    self.skipWaiting();
   } else if (d.type === "wake") {
     rearmFromIDB();   /* الصفحة عادت للمقدّمة — تأكّد أن التذكير حيّ */
   }

@@ -2996,10 +2996,41 @@ function vtOpen(id, fn) {
    manifest.json و sw.js ملفات حقيقية على القرص (لا Blob) حتى تبقى
    مسجَّلة بثبات بين الجلسات وتدعم الاستضافة على GitHub Pages.
    ══════════════════════════════════════════════════════════ */
+/* يُستدعى حين يصل إصدار جديد — تضبطه الواجهة لتعرض بانر التحديث */
+let onSwUpdate = null;
+function setSwUpdateHandler(fn) { onSwUpdate = fn; if (fn && window.__swWaiting) fn(); }
+/* يفعّل النسخة المنتظرة ويعيد التحميل — الطريق الوحيد المضمون للخروج من
+   نسخة قديمة عالقة في التخزين المؤقّت. */
+function applySwUpdate() {
+  const w = window.__swWaiting;
+  if (w) { try { w.postMessage({ type: "skip-waiting" }); } catch (e) {} }
+  setTimeout(function () { location.reload(); }, 300);
+}
+
 function registerPWA() {
   // رابط الـmanifest موجود في <head> أصلًا (manifest.json) — لا حاجة لحقنه هنا.
   if ("serviceWorker" in navigator) {
+    /* تبديل المتحكّم يعني أن النسخة الجديدة تولّت — نعيد التحميل مرة واحدة */
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (reloaded) return; reloaded = true; location.reload();
+    });
     navigator.serviceWorker.register("sw.js").then(reg => {
+      /* نسخة منتظرة موجودة أصلًا عند فتح التطبيق */
+      const flag = w => { if (!w) return; window.__swWaiting = w; if (onSwUpdate) onSwUpdate(); };
+      if (reg.waiting && navigator.serviceWorker.controller) flag(reg.waiting);
+      reg.addEventListener("updatefound", function () {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", function () {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) flag(nw);
+        });
+      });
+      /* افحص عند كل فتح وعند العودة للمقدّمة — GitHub Pages قد يخزّن sw.js دقائق */
+      const check = function () { try { reg.update(); } catch (e) {} };
+      check();
+      document.addEventListener("visibilitychange", function () { if (!document.hidden) check(); });
+      setInterval(check, 30 * 60 * 1000);
       // أفضل جهد: Periodic Background Sync لتطبيق مثبَّت (المتصفح يقرر التوقيت الفعلي)
       if ("periodicSync" in reg) {
         navigator.permissions.query({ name: "periodic-background-sync" }).then(status => {
@@ -8043,6 +8074,10 @@ function App() {
   const [nsoHub, setNsoHub] = useState(false);
   /* بلاغ لمرة واحدة عمّا أزاله تنظيف استيراد RA القديم */
   const [purgeNote, setPurgeNote] = useState(null);
+  /* نسخة جديدة من التطبيق بانتظار التفعيل. بلا هذا يبقى المستخدم على نسخة
+     قديمة محفوظة في التخزين المؤقّت ويظنّ أن التحديث لم يُنشر أصلًا. */
+  const [swReady, setSwReady] = useState(false);
+  useEffect(() => { setSwUpdateHandler(() => setSwReady(true)); }, []);
   const [nsoSub, setNsoSub] = useState({ plan: "expansion", expiry: "" });
   /* تبديل العالم: يمسح فلاتر العالم الآخر حتى لا تبقى فلترة خفية تُخفي
      ألعابًا بلا سبب ظاهر (فلتر CRT مثلًا لا معنى له داخل عالم المحاكاة). */
@@ -9406,7 +9441,16 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", { className: "tnag-t" }, "⏰ عدّاد «", tNag.name, "» شغال منذ ", fmtHours(tNag.hrs), " — ما زلت تلعب؟"),
   /*#__PURE__*/React.createElement("div", { className: "timer-btns" },
     /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: () => setTNag(null) }, "✅ ما زلت ألعب"),
-    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { pauseTimer(); const tg = games.find(x => x.id === tNag.gameId); setTNag(null); if (tg) openGame(tg); } }, "⏸️ هولد وافتح اللعبة لأعدّل الوقت"))), purgeNote && /*#__PURE__*/React.createElement("div", {
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { pauseTimer(); const tg = games.find(x => x.id === tNag.gameId); setTNag(null); if (tg) openGame(tg); } }, "⏸️ هولد وافتح اللعبة لأعدّل الوقت"))), swReady && /*#__PURE__*/React.createElement("div", {
+    className: "timer-nag sw-nag"
+  }, /*#__PURE__*/React.createElement("div", { className: "tnag-t" },
+    "✨ نسخة جديدة من التطبيق جاهزة"),
+  /*#__PURE__*/React.createElement("div", { className: "tnag-t", style: { opacity: .85, fontWeight: 400 } },
+    "بياناتك محفوظة ولا تتأثّر — التحديث يعيد تحميل الصفحة فقط."),
+  /*#__PURE__*/React.createElement("div", { className: "timer-btns" },
+    /*#__PURE__*/React.createElement("button", { className: "btn primary", onClick: applySwUpdate }, "🔄 حدّث الآن"),
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => setSwReady(false) }, "لاحقًا"))),
+  purgeNote && /*#__PURE__*/React.createElement("div", {
     className: "timer-nag"
   }, /*#__PURE__*/React.createElement("div", { className: "tnag-t" },
     "🧹 أُلغي استيراد الألعاب من RetroAchievements — صار الربط للإنجازات فقط، والوقت بالعدّاد اليدوي."),
@@ -10503,6 +10547,8 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
   .scope-tab.on .sc-lb{ display:inline; }
 }
 /* سطر إجمالي مصادر الخبرة — يجب أن يطابق الإجمالي المعروض تحت المستوى */
+.sw-nag{ border-color:rgba(74,222,128,.45); }
+.sw-nag .tnag-t:first-child{ color:#4ade80; }
 .xp-total{ margin-top:10px; padding-top:8px; border-top:1px solid var(--hair); font-size:12px; color:var(--txt-2); text-align:center; }
 .xp-total b{ font-family:var(--num); color:#f5b942; font-size:14px; }
 .xp-drift{ color:#fb7185; font-size:10.5px; }
