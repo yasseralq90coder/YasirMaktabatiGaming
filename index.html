@@ -1516,12 +1516,23 @@ function runPoints(n) {
   for (let i = 0; i < (Number(n) || 0); i++) t += RUN_PTS[Math.min(i, RUN_PTS.length - 1)];
   return t;
 }
+/* مكافأة الفداء: العودة للعبة هجرتها وختمها أثقل من ختم لعبة جديدة، لأنك
+   تغلّبتَ على شيء آخر غير اللعبة. تزيد بطول ما هجرتَها، وتُمنح مرة واحدة
+   لأن `ghostTag` يقيس أطول فجوة سبقت تختيمةً. */
+const REDEEM_PTS = [400, 300, 200, 100];   /* يطابق REDEEM_NAMES بالترتيب */
+function redeemBonus(g) {
+  const t = ghostTag(g);
+  if (!t || t.state !== "redeemed") return 0;
+  const i = REDEEM_NAMES.findIndex(r => t.days >= r[0]);
+  return i < 0 ? 0 : REDEEM_PTS[i];
+}
 function miranOfGame(g) {
   if (!g || isShell(g)) return 0;
   let m = MIRAN_PER_HOUR * Math.max(0, cycleXpHours(g));
   m += runPoints(fullRuns(g));
   m += gameMedal(g).pts;
   m += huntMedal(g).pts;
+  m += redeemBonus(g);
   return Math.round(m);
 }
 const miranGames = games => (games || []).reduce((t, g) => t + miranOfGame(g), 0);
@@ -1654,6 +1665,75 @@ const ALL_TITLES = TITLES.concat(HUNT_TITLES);
 function earnedTitles(games) {
   const list = (games || []).filter(x => x && !isShell(x));
   return ALL_TITLES.filter(t => { try { return t.check(list); } catch (e) { return false; } });
+}
+
+/* ═══════════ البصمات ═══════════
+   حدث فريد يقع مرة. وهنا وحدها يجوز الشرط: البصمة قد تعتمد على RA أو على معدّل
+   HowLongToBeat، بخلاف اللقب الذي يجب أن يكون في متناول كل لاعب. */
+
+/* نسبة ساعاتك لمعدّل HowLongToBeat للعبة — المعيار العادل الوحيد لمقارنة
+   سونيك ١ بفاينل فانتسي: كلٌّ يُقاس بنفسه لا بغيره. */
+function ttbRatio(g) {
+  const t = Number(g && (g.ttbMain || g.ttbFull)) || 0;
+  const h = Math.max(0, realPlayHours(g));
+  return (t > 0 && h > 0) ? h / t : 0;
+}
+const beatenGames = games => (games || []).filter(g => g && !isShell(g) && fullRuns(g) > 0);
+const redeemedGames = games => (games || []).filter(g => {
+  const t = ghostTag(g);
+  return !!(t && t.state === "redeemed");
+});
+
+const FEATS = [
+  /* ---- الرفّ ---- */
+  { id: "intro_only", icon: "🎬", name: "شفت المقدّمة وبس", req: "٥ ألعاب فيها أقل من ساعتين ولا تختيمة",
+    check: g => g.filter(x => isPending(x) && realPlayHours(x) < 2).length >= 5 },
+  { id: "last_boss", icon: "🏔️", name: "تركتها عند آخر زعيم", req: "تجاوزت ٩٠٪ من معدّل العالم ثم توقّفت",
+    check: g => g.some(x => isPending(x) && ttbRatio(x) >= 0.9) },
+  { id: "halfway", icon: "🌗", name: "نصّ الطريق", req: "٣ ألعاب وقفت عند منتصف معدّلها",
+    check: g => g.filter(x => { const r = ttbRatio(x); return isPending(x) && r >= 0.4 && r <= 0.6; }).length >= 3 },
+  { id: "starts", icon: "🎪", name: "جامع البدايات", req: "١٠ ألعاب بدأتها ولم تختم واحدة منها",
+    check: g => g.filter(isPending).length >= 10 },
+  { id: "tilted", icon: "⚖️", name: "الميزان المائل", req: "ساعاتك في غير المختومة تجاوزت المختومة",
+    check: g => {
+      const p = g.filter(isPending).reduce((t, x) => t + realPlayHours(x), 0);
+      const b = beatenGames(g).reduce((t, x) => t + realPlayHours(x), 0);
+      return p > 0 && p > b;
+    } },
+  /* ---- الفداء ---- */
+  { id: "first_back", icon: "🔙", name: "أول عودة", req: "عدت للعبة هجرتها شهرًا فأكثر وختمتها",
+    check: g => redeemedGames(g).length >= 1 },
+  { id: "sweeper", icon: "🧹", name: "كنّاس الرفّ", req: "٣ عودات ناجحة",
+    check: g => redeemedGames(g).length >= 3 },
+  { id: "late_love", icon: "🏆", name: "قصّة حبّ متأخّرة", req: "عدت للعبة بعد سنتين وختمتها",
+    check: g => g.some(x => { const t = ghostTag(x); return t && t.state === "redeemed" && t.days >= 730; }) },
+  /* ---- المعيار النسبي ---- */
+  { id: "faster", icon: "⚡", name: "أسرع من العالم", req: "ختمت لعبة بأقل من معدّل HowLongToBeat",
+    check: g => beatenGames(g).some(x => { const r = ttbRatio(x); return r > 0 && r <= 0.85; }) },
+  { id: "thorough", icon: "🔬", name: "المُستقصي", req: "ختمت لعبة بضعف معدّلها — فتّشت كل زاوية",
+    check: g => beatenGames(g).some(x => ttbRatio(x) >= 2) },
+  { id: "on_scale", icon: "🎯", name: "على الميزان", req: "٥ ألعاب ختمتها قريبًا من معدّلها",
+    check: g => beatenGames(g).filter(x => { const r = ttbRatio(x); return r >= 0.85 && r <= 1.15; }).length >= 5 },
+  /* ---- الجلسة الواحدة ومجد الريترو ---- */
+  { id: "one_sit", icon: "🕹️", name: "بجلسة واحدة", req: "بدأتها وأنهيتها في جلسة متّصلة",
+    check: g => g.some(beatInOneSitting) },
+  { id: "retro_sit", icon: "🏛️", name: "على طريقة الزمن الجميل", req: "٣ ألعاب من الجيل ١–٤ بجلسة واحدة",
+    check: g => g.filter(x => eraOf(x.platform) >= 1 && eraOf(x.platform) <= 4 && beatInOneSitting(x)).length >= 3 },
+  /* ---- الوقت والإعادة ---- */
+  { id: "marathon", icon: "🏃", name: "الماراثوني", req: "جلسة واحدة ٨ ساعات متّصلة",
+    check: g => g.some(x => (x.sessions || []).some(s => isSitting(s) && (Number(s.ms) || 0) >= 8 * 3600000)) },
+  { id: "epic", icon: "🐉", name: "قاهر الملاحم", req: "ختمت لعبة تجاوزت ٦٠ ساعة",
+    check: g => allRuns(g).some(r => r.hours >= 60) },
+  { id: "sprint", icon: "⚡", name: "خاطفة", req: "ختمت لعبة في أقل من ٣ ساعات",
+    check: g => allRuns(g).some(r => r.hours > 0 && r.hours < 3) },
+  { id: "gild3", icon: "✨", name: "ثالث تذهيبة", req: "لعبة أعدت إتقانها ٣ مرات",
+    check: g => g.some(x => gameMedal(x).gild >= 3) },
+  { id: "endless_king", icon: "♾️", name: "ما لها نهاية", req: "٣٠٠ ساعة في لعبة بلا نهاية",
+    check: g => g.some(x => isEndless(x) && realPlayHours(x) >= 300) }
+];
+function earnedFeats(games) {
+  const list = (games || []).filter(x => x && !isShell(x));
+  return FEATS.filter(f => { try { return f.check(list); } catch (e) { return false; } });
 }
 
 /* ═══════════ المِحكّات ═══════════
@@ -4090,7 +4170,7 @@ function GameDetail({
         /*#__PURE__*/React.createElement("div", null,
           /*#__PURE__*/React.createElement("b", null, t.name),
           /*#__PURE__*/React.createElement("div", null, t.state === "redeemed"
-            ? "عدت لها بعد " + t.days + " يومًا وختمتها"
+            ? "عدت لها بعد " + t.days + " يومًا وختمتها — " + redeemBonus(game) + " مِران فداء"
             : "آخر مرة لعبتها قبل " + t.days + " يومًا — و" + fmtHours(t.hours) + " فيها"))));
   })(),
   (() => { const p = predictFinish(game, allGames); return p ? /*#__PURE__*/React.createElement("div", { className: "pred-box" }, p) : null; })(), Number(game.rating) > 0 && /*#__PURE__*/React.createElement(Stars, {
@@ -6329,6 +6409,8 @@ function AchievementsView({
     const rk = miranRankOf(real), sh = shelfRankOf(real), hn = huntRankOf(real);
     const titles = earnedTitles(real);
     const got = new Set(titles.map(t => t.id));
+    const feats = earnedFeats(real);
+    const gotF = new Set(feats.map(f => f.id));
     const tr = trialsOf(real);
     const pend = real.filter(isPending).sort((a, b) => realPlayHours(b) - realPlayHours(a));
     const gilded = real.filter(g => gameMedal(g).gild > 0).length;
@@ -6352,6 +6434,7 @@ function AchievementsView({
       E("div", { className: "ach-sum", style: { marginTop: 12 } },
         [["🥇", mastered, "أتقنتها", "#f5b942"], ["✨", gilded, "مذهّبة", "#fb923c"],
          ["🏅", titles.length + "/" + ALL_TITLES.length, "ألقاب", "#a78bfa"],
+         ["🔖", feats.length + "/" + FEATS.length, "بصمات", "#4ade80"],
          ["📚", pend.length, "مُعلَّقة", "#22d3ee"]]
           .map(([ic, v, l, col], i) => E("div", { className: "ach-sum-cell", key: i },
             E("span", { className: "as-ic" }, ic),
@@ -6366,6 +6449,16 @@ function AchievementsView({
         E("div", { className: "tc-i" }, E("b", null, t.name), E("small", null, t.req)),
         got.has(t.id) ? E("span", { className: "tc-ok" }, "✓") : null))),
 
+      E("div", { className: "section-title" }, "🔖 البصمات"),
+      E("p", { className: "bk-desc" },
+        "حدث فريد يقع مرة. وهنا وحدها يجوز الشرط — قد تعتمد البصمة على معدّل HowLongToBeat أو على RetroAchievements، ",
+        "بخلاف اللقب الذي يجب أن يكون في متناول كل لاعب."),
+      E("div", { className: "title-grid" }, FEATS.map(f => E("div", {
+        key: f.id, className: "ttl-card feat" + (gotF.has(f.id) ? " on" : "")
+      },
+        E("span", { className: "tc-ic" }, f.icon),
+        E("div", { className: "tc-i" }, E("b", null, f.name), E("small", null, f.req)),
+        gotF.has(f.id) ? E("span", { className: "tc-ok" }, "✓") : null))),
       E("div", { className: "section-title" }, "📊 المِحكّات"),
       E("p", { className: "bk-desc" },
         "عتبات تتصاعد بلا نهاية، تُولَّد من لعبك لا من قوائم مكتوبة. الجهاز والحقبة بالساعات وحدها — عدد الألعاب اقتناء لا لعب."),
@@ -10275,6 +10368,8 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
   border-radius:var(--r2); border:1px solid var(--line); background:var(--s1); opacity:.55;
 }
 .ttl-card.on{ opacity:1; border-color:rgba(167,139,250,.45); background:rgba(167,139,250,.08); }
+.ttl-card.feat.on{ border-color:rgba(74,222,128,.4); background:rgba(74,222,128,.07); }
+.ttl-card.feat.on .tc-i b{ color:#4ade80; }
 .ttl-card .tc-ic{ font-size:21px; line-height:1; flex:none; filter:grayscale(1); }
 .ttl-card.on .tc-ic{ filter:none; }
 .ttl-card .tc-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }

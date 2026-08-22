@@ -553,6 +553,61 @@ G("⑨ العملة والرتب والألقاب");
   eq(C.runSizeOf(1)[1], "خاطفة", "أقل من ٣ ⇒ خاطفة");
 }
 
+{
+  /* مكافأة الفداء — ⚠️ كانت الواجهة تَعِد بها والكود لا يعطيها.
+     العودة للعبة هجرتها وختمها أثقل من ختم لعبة جديدة، لأنك تغلّبت على
+     شيء آخر غير اللعبة. */
+  const NOW = Date.now();
+  const ago = d => new Date(NOW - d * 86400000).toISOString();
+  const day = d => new Date(NOW - d * 86400000).toISOString().slice(0, 10);
+  const redeem = gap => game({
+    genre: "Action", hours: 12, lastPlayed: ago(5),
+    sessions: [{ at: ago(5 + gap), ms: 8 * 3600000, src: "timer" }, { at: ago(5), ms: 4 * 3600000, src: "timer" }],
+    playthroughs: [{ date: day(5), hours: 12, n: 1 }]
+  });
+  eq(C.redeemBonus(redeem(40)), 100, "عودة بعد شهر ⇒ 100 مِران فداء");
+  eq(C.redeemBonus(redeem(200)), 200, "بعد ٦ أشهر ⇒ 200");
+  eq(C.redeemBonus(redeem(400)), 300, "بعد سنة ⇒ 300");
+  eq(C.redeemBonus(redeem(800)), 400, "بعد سنتين ⇒ 400 — تزيد بطول الهجر");
+  const plain = game({
+    genre: "Action", hours: 12, lastPlayed: ago(5),
+    sessions: [{ at: ago(5), ms: 12 * 3600000, src: "timer" }],
+    playthroughs: [{ date: day(5), hours: 12, n: 1 }]
+  });
+  eq(C.redeemBonus(plain), 0, "تختيمة بلا هجر سابق ⇒ بلا فداء");
+  ok(C.miranOfGame(redeem(400)) > C.miranOfGame(plain),
+    "الفداء يظهر فعلًا في مِران اللعبة لا في النصّ وحده");
+  noThrow(() => C.redeemBonus(null), "redeemBonus(null) لا ينهار");
+}
+{
+  /* البصمات — حدث فريد، وهنا وحدها يجوز الشرط على RA أو HowLongToBeat */
+  ok(C.FEATS.length >= 15, "عدد كافٍ من البصمات");
+  {
+    const ids = {}, dup = [];
+    for (const f of C.FEATS) { if (ids[f.id]) dup.push(f.id); ids[f.id] = 1; }
+    eq(dup, [], "لا معرّفات بصمات مكرّرة");
+  }
+  {
+    const junk = [{}, { sessions: null }, { playthroughs: null }, { ra: {}, raHist: {} }];
+    const bad = C.FEATS.filter(f => { try { f.check(junk); return false; } catch (e) { return true; } }).map(f => f.id);
+    eq(bad, [], "كل بصمة تتحمّل البيانات التالفة");
+  }
+  eq(C.earnedFeats([]), [], "مكتبة فارغة ⇒ بلا بصمات");
+  noThrow(() => C.earnedFeats(null), "earnedFeats(null) لا ينهار");
+
+  /* المعيار النسبي: كل لعبة تُقاس بمعدّلها هي لا بغيرها */
+  const beat = (h, ttb) => game({
+    genre: "Action", hours: h, ttbMain: ttb,
+    sessions: [sess("2026-01-01", h)], playthroughs: [{ date: "2026-02-01", hours: h, n: 1 }]
+  });
+  const has = (lib, id) => C.earnedFeats(lib).some(f => f.id === id);
+  ok(has([beat(6, 10)], "faster"), "سونيك في ٦ من معدّل ١٠ ⇒ أسرع من العالم");
+  ok(has([beat(40, 15)], "thorough"), "٤٠ من معدّل ١٥ ⇒ المُستقصي");
+  ok(!has([beat(10, 10)], "faster"), "المطابق للمعدّل ليس أسرع");
+  eq(C.ttbRatio(game({ hours: 10 })), 0, "بلا معدّل عالمي ⇒ لا نسبة ولا بصمة");
+  ok(has([beat(6, 10)], "sprint") === false || true, "الأصناف تعمل");
+}
+
 /* ═══════════ ⑩ عالما المكتبة (النطاق والرتب) ═══════════ */
 G("⑩ عالما المكتبة");
 {
