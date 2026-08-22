@@ -431,8 +431,130 @@ G("⑧ نظام المِران");
   noThrow(() => C.gameMedal({}), "gameMedal على لعبة فارغة لا ينهار");
 }
 
-/* ═══════════ ⑨ عالما المكتبة (النطاق والرتب) ═══════════ */
-G("⑨ عالما المكتبة");
+/* ═══════════ ⑨ المِران: العملة والرتب والألقاب والمِحكّات ═══════════ */
+G("⑨ العملة والرتب والألقاب");
+{
+  const play = (name, o) => game(Object.assign({ name: name, genre: "Action" }, o));
+
+  /* ⚠️ القاعدة الأولى: الاقتناء صفر. لعبة في مكتبتك لم تُشغَّل لا تعطي شيئًا
+     مهما كان جهازها أو ثمنها — هذا جوهر ما يفرّق المِران عن نظام XP القديم. */
+  eq(C.miranOfGame(play("مشتراة", { type: "physical", hours: 0 })), 0,
+    "لعبة لم تُشغَّل ⇒ صفر مِران مهما كان نوعها");
+  eq(C.miranOfGame(play("غلاف", { shell: true, hours: 100, sessions: [sess("2026-01-01", 100)] })), 0,
+    "غلاف المجموعة لا يعطي مِرانًا");
+  noThrow(() => C.miranOfGame(null), "miranOfGame(null) لا ينهار");
+  noThrow(() => C.miranTotal(null), "miranTotal(null) لا ينهار");
+
+  eq(C.runPoints(0), 0, "بلا تختيمات ⇒ صفر");
+  eq(C.runPoints(1), 100, "التختيمة الأولى 100");
+  eq(C.runPoints(3), 475, "الثلاث الأولى 100+150+225");
+  eq(C.runPoints(5), 1315, "الخمس الأولى تتصاعد");
+  eq(C.runPoints(7) - C.runPoints(6), 500, "بعد الخامسة تثبت عند 500 بلا حدّ للعدد");
+
+  {
+    /* الإعادة تعطي أكثر من نفس الساعات بلا إعادة — جوهر الحلقة */
+    const once = play("مرة", { hours: 30, sessions: [sess("2026-01-10", 30)],
+      playthroughs: [{ date: "2026-06-01", hours: 30, n: 1 }] });
+    const thrice = play("ثلاث", { hours: 30,
+      sessions: [sess("2026-01-10", 10), sess("2026-03-10", 10), sess("2026-05-10", 10)],
+      playthroughs: [{ date: "2026-02-01", hours: 10, n: 1 }, { date: "2026-04-01", hours: 10, n: 2 }, { date: "2026-06-01", hours: 10, n: 3 }] });
+    ok(C.miranOfGame(thrice) > C.miranOfGame(once) * 1.5,
+      "ثلاث تختيمات تتفوّق بوضوح على واحدة بنفس الساعات");
+  }
+}
+{
+  /* السُّلَّم اللانهائي: لا يقف عند آخر رتبة مسمّاة بل يكمل بنجوم */
+  const L = [[0, "أ", "1"], [100, "ب", "2"], [300, "ج", "3"]];
+  eq(C.endlessRank(L, 50).name, "أ", "دون الحدّ ⇒ الرتبة الأولى");
+  eq(C.endlessRank(L, 300, 100).stars, 0, "عند آخر رتبة بالضبط ⇒ بلا نجوم");
+  eq(C.endlessRank(L, 450, 100).stars, 1, "بعدها بخطوة ⇒ نجمة");
+  eq(C.endlessRank(L, 900, 100).stars, 6, "التقدّم لا يقف أبدًا");
+  eq(C.endlessRank(L, 900, 100).name, "ج", "الاسم يبقى وتزيد النجوم");
+  eq(C.endlessRank(L, -5, 100).name, "أ", "قيمة سالبة لا تنهار");
+}
+{
+  /* سلّم الرفّ — ساعاتك فيما لم تختمه. الألعاب بلا نهاية مستثناة. */
+  const pend = h => game({ genre: "Action", hours: h, sessions: [sess("2026-01-01", h)] });
+  eq(Math.round(C.shelfHours([pend(30), pend(50)])), 80, "يجمع ساعات المُعلَّقات");
+  eq(C.shelfHours([game({ genre: "Sports", hours: 100, sessions: [sess("2026-01-01", 100)] })]), 0,
+    "لعبة بلا نهاية ليست مُعلَّقة — لا تأخير في ما لا يُختَم");
+  eq(C.shelfHours([game({ genre: "Action", hours: 40, sessions: [sess("2026-01-01", 40)],
+    playthroughs: [{ date: "2026-02-01", n: 1 }] })]), 0, "المختومة تخرج من الرفّ");
+  eq(C.shelfHours([pend(0.5)]), 0, "أقل من ساعة لا تُحتسب");
+  ok(C.shelfRankOf([pend(30)]).name.length > 0, "رتبة الرفّ تُحسب");
+  noThrow(() => C.shelfHours(null), "shelfHours(null) لا ينهار");
+}
+{
+  /* وسام الصيد — مستقلّ، ولا يُمنح للعبة على جهاز أصلي */
+  const ra = (got, tot, hc, mast) => game({
+    hardware: "emulator", emuDevice: "pc", raGameId: 1,
+    ra: { gameId: 1, numAchievements: tot, numAwarded: got, numAwardedHardcore: hc || 0,
+      achievements: Array.from({ length: tot }, (_, i) => ({ id: i + 1, earned: i < got, hardcore: i < (hc || 0), points: 10 })) },
+    raHist: { v: 2, seededAt: "x", ach: {}, masteries: Array(mast || 0).fill({}), resets: [] }
+  });
+  eq(C.huntMedal(ra(1, 10)).name, "فتحتَ الصيد", "أول إنجاز يفتح الصيد");
+  eq(C.huntMedal(ra(5, 10)).name, "نصف الطريق", "٥٠٪ ⇒ نصف الطريق");
+  eq(C.huntMedal(ra(10, 10)).name, "إتقان الطقم", "الكل ⇒ إتقان الطقم");
+  eq(C.huntMedal(ra(10, 10, 10)).name, "إتقان صافٍ", "الكل Hardcore ⇒ إتقان صافٍ");
+  eq(C.huntMedal(ra(10, 10, 10, 3)).gild, 2, "إعادة الإتقان تُذهّب الوسام");
+  eq(C.huntMedal(game({ hardware: "original" })).tier, 0, "جهاز أصلي ⇒ بلا وسام صيد");
+  eq(C.huntMedal(ra(0, 10)).tier, 0, "بلا إنجازات ⇒ بلا وسام");
+  noThrow(() => C.huntMedal(null), "huntMedal(null) لا ينهار");
+}
+{
+  /* الألقاب: ١٦ لقبًا، ولا واحد من الاثني عشر العامّة يحتاج RA */
+  eq(C.ALL_TITLES.length, 16, "١٢ لقبًا عامًّا + ٤ للصيد");
+  eq(C.TITLES.length, 12, "الألقاب العامّة اثنا عشر");
+  {
+    const ids = {}, dup = [];
+    for (const t of C.ALL_TITLES) { if (ids[t.id]) dup.push(t.id); ids[t.id] = 1; }
+    eq(dup, [], "لا معرّفات ألقاب مكرّرة");
+  }
+  eq(C.earnedTitles([]), [], "مكتبة فارغة ⇒ بلا ألقاب");
+  {
+    const junk = [{}, { sessions: null }, { playthroughs: null }, { ra: {}, raHist: {} }];
+    const bad = C.ALL_TITLES.filter(t => { try { t.check(junk); return false; } catch (e) { return true; } }).map(t => t.id);
+    eq(bad, [], "كل لقب يتحمّل البيانات التالفة");
+  }
+  {
+    const diver = game({ genre: "Action", hours: 320, sessions: [sess("2026-01-01", 320)] });
+    ok(C.earnedTitles([diver]).some(t => t.id === "diver"), "٣٠٠ ساعة في لعبة ⇒ الغوّاص");
+    ok(!C.earnedTitles([game({ genre: "Action", hours: 100, sessions: [sess("2026-01-01", 100)] })]).some(t => t.id === "diver"),
+      "١٠٠ ساعة لا تكفي");
+  }
+  {
+    const loyal = game({ genre: "Action", hours: 30,
+      sessions: [sess("2024-01-01", 10), sess("2025-01-01", 10), sess("2026-01-01", 10)] });
+    ok(C.earnedTitles([loyal]).some(t => t.id === "faithful"), "٣ سنوات مختلفة ⇒ الوفيّ");
+  }
+}
+{
+  /* المِحكّات — تُولَّد آليًا من المحاور الخمسة */
+  const lib = [
+    game({ name: "A", platform: "Sega Genesis", genre: "Platformer", hours: 120, sessions: [sess("2026-01-01", 120)],
+      playthroughs: [{ date: "2026-02-01", hours: 2, n: 1 }] }),
+    game({ name: "B", platform: "PlayStation 2", genre: "RPG", hours: 80, sessions: [sess("2026-03-01", 80)],
+      playthroughs: [{ date: "2026-04-01", hours: 80, n: 1 }] })
+  ];
+  const tr = C.trialsOf(lib);
+  eq(Object.keys(tr).sort(), ["era", "game", "genre", "platform", "size"], "خمسة محاور");
+  eq(tr.game[0].label, "A", "أعلى لعبة بالساعات أولًا");
+  ok(tr.platform.some(x => x.label === "PlayStation 2"), "محور الجهاز يقيس الساعات");
+  ok(tr.era.some(x => /الجيل/.test(x.label)), "محور الحقبة يعمل");
+  ok(tr.size.some(x => /ملحمة/.test(x.label)), "تختيمة ٨٠ ساعة ⇒ ملحمة");
+  ok(tr.size.some(x => /خاطفة/.test(x.label)), "تختيمة ساعتين ⇒ خاطفة");
+  noThrow(() => C.trialsOf(null), "trialsOf(null) لا ينهار");
+
+  eq(C.trialTier(0).tier, 0, "الصفر ⇒ المستوى صفر");
+  eq(C.trialTier(10).tier, 1, "العتبة الأولى");
+  eq(C.trialTier(1000).tier, 9, "آخر عتبة مكتوبة");
+  ok(C.trialTier(5000).tier > 9, "المِحكّ لا يقف عند آخر عتبة");
+  eq(C.runSizeOf(80)[1], "ملحمة", "٦٠ ساعة فأكثر ⇒ ملحمة");
+  eq(C.runSizeOf(1)[1], "خاطفة", "أقل من ٣ ⇒ خاطفة");
+}
+
+/* ═══════════ ⑩ عالما المكتبة (النطاق والرتب) ═══════════ */
+G("⑩ عالما المكتبة");
 {
   const orig = game({ id: "o", hardware: "original", type: "physical", hours: 5,
     sessions: [sess("2026-08-01", 5)], playthroughs: [{ date: "2026-08-01", hours: 5, n: 1 }] });
@@ -471,8 +593,8 @@ G("⑨ عالما المكتبة");
   eq(C.rankOn(L, "abc").name, "أ", "نتيجة غير رقمية تُعامَل صفرًا");
 }
 
-/* ═══════════ ⑩ اتساق الإجمالي ═══════════ */
-G("⑩ اتساق نقاط الخبرة الكلية");
+/* ═══════════ ⑪ اتساق الإجمالي ═══════════ */
+G("⑪ اتساق نقاط الخبرة الكلية");
 {
   /* شاشة «مصادر نقاط الخبرة» تعرض بنودًا يجب أن تجمع إلى totalXp بالضبط.
      كان بندا التحديات والسلسلة غائبين، فظهر فارق غير مفسَّر تحت المستوى. */

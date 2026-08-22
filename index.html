@@ -1434,6 +1434,273 @@ function ghostTag(g, now) {
   return { state: "ghost", icon: row[col][0], name: row[col][1], days: gone, hours: hrs };
 }
 
+/* ═══════════ المِران: العملة والرتب ═══════════ */
+
+/* ---------- صنف التختيمة ----------
+   وصفٌ لا حكم. سونيك ١ يُختَم في ساعتين وفاينل فانتسي في ستّين، وأجهزة ما قبل
+   بطارية الحفظ صُمّمت لتُختَم بجلسة واحدة — فقِصَر اللعبة تصميمُ عصرها لا نقصٌ فيها.
+   لا صنف أشرف من صنف؛ جمعُها كلها هو الإنجاز. */
+const RUN_SIZES = [
+  [60, "ملحمة", "🐉"], [30, "طويلة", "🏔️"], [10, "متوسطة", "🗺️"],
+  [3, "قصيرة", "🎯"], [0, "خاطفة", "⚡"]
+];
+const runSizeOf = h => RUN_SIZES.find(r => (Number(h) || 0) >= r[0]) || RUN_SIZES[RUN_SIZES.length - 1];
+/* كل تختيمات المكتبة مصنَّفةً — التختيمة بلا ساعات تُنسب لساعات اللعبة مقسومةً */
+function allRuns(games) {
+  const out = [];
+  for (const g of (games || [])) {
+    if (!g || isShell(g)) continue;
+    const runs = g.playthroughs || [];
+    const fallback = runs.length ? Math.max(0, realPlayHours(g)) / runs.length : 0;
+    for (const r of runs) {
+      if (!r) continue;
+      const h = Number(r.hours) > 0 ? Number(r.hours) : fallback;
+      out.push({ g: g, date: r.date || "", hours: h, size: runSizeOf(h) });
+    }
+  }
+  return out;
+}
+
+/* ---------- الجلسة الواحدة ----------
+   مجد ألعاب ما قبل الحفظ والأركيد: بدأتَها وأنهيتَها متّصلةً. نكتشفه من الجلسات
+   نفسها — جلسة واحدة تغطّي أغلب وقت اللعبة، وتختيمة في يومها أو الذي يليه. */
+function beatInOneSitting(g) {
+  if (!g || !fullRuns(g)) return false;
+  const hrs = Math.max(0, realPlayHours(g));
+  if (hrs <= 0) return false;
+  const sess = (g.sessions || []).filter(s => s && s.at && s.src !== "backfill" && isSitting(s));
+  if (!sess.length) return false;
+  const longest = sess.reduce((m, s) => Math.max(m, Number(s.ms) || 0), 0) / 3600000;
+  if (longest < hrs * 0.8) return false;              // الجلسة تغطّي 80٪ من وقتها
+  const day = localDay(sess.reduce((a, s) => (Number(s.ms) || 0) > (Number(a.ms) || 0) ? s : a).at);
+  return (g.playthroughs || []).some(r => {
+    if (!r || !r.date) return false;
+    const d = Math.abs(Date.parse(r.date + "T12:00:00") - Date.parse(day + "T12:00:00")) / 86400000;
+    return d <= 1;
+  });
+}
+
+/* ---------- وسام الصيد (RetroAchievements) ----------
+   مسار مستقلّ بجانب وسام اللعبة لا بديل عنه. RA يغطّي الأجهزة الريترو وحدها،
+   فبناء التقدّم الرئيسي عليه كان سيجعل لعبةً على PS5 مواطنًا من الدرجة الثانية
+   لسببٍ لا حيلة لها فيه. لذلك: أوسمة الصيد وحدها تضيف مِرانًا، لا عدد الإنجازات الخام. */
+const HUNT_MEDALS = [
+  { k: "clean",  icon: "🔥", name: "إتقان صافٍ",  pts: 150 },
+  { k: "set",    icon: "💎", name: "إتقان الطقم", pts: 250 },
+  { k: "half",   icon: "🏅", name: "نصف الطريق",  pts: 80 },
+  { k: "opened", icon: "🎖️", name: "فتحتَ الصيد", pts: 30 }
+];
+function huntMedal(g) {
+  if (!raShows(g)) return { tier: 0, pts: 0, gild: 0 };
+  const tot = raTotalCount(g), got = raEarnedCount(g);
+  if (!tot || !got) return { tier: 0, pts: 0, gild: 0 };
+  const hc = Number((g.ra || {}).numAwardedHardcore) || 0;
+  const mastered = got >= tot;
+  const clean = mastered && hc >= tot;
+  const gild = Math.max(0, raMasteries(g) - 1);       // إعادة الإتقان بعد الأولى
+  let tier = 1;                                       // فتحتَ الصيد
+  if (mastered) tier = clean ? 4 : 3;
+  else if (got * 2 >= tot) tier = 2;
+  const m = HUNT_MEDALS[4 - tier];
+  const pts = HUNT_MEDALS.slice(4 - tier).reduce((s, x) => s + x.pts, 0) + gild * 200;
+  return { tier: tier, key: m.k, icon: m.icon, name: m.name, pts: pts, gild: gild, got: got, total: tot };
+}
+
+/* ---------- نقاط المِران ----------
+   ثلاثة مقاييس لا غير: الوقت، والتختيم، وإعادة التختيم.
+   ⚠️ الاقتناء صفر — اللعبة غير المُشغَّلة لا تعطي شيئًا مهما كان جهازها أو ثمنها. */
+const MIRAN_PER_HOUR = 10;
+const RUN_PTS = [100, 150, 225, 340, 500];   /* التختيمة الخامسة فصاعدًا 500 بلا حدّ للعدد */
+function runPoints(n) {
+  let t = 0;
+  for (let i = 0; i < (Number(n) || 0); i++) t += RUN_PTS[Math.min(i, RUN_PTS.length - 1)];
+  return t;
+}
+function miranOfGame(g) {
+  if (!g || isShell(g)) return 0;
+  let m = MIRAN_PER_HOUR * Math.max(0, cycleXpHours(g));
+  m += runPoints(fullRuns(g));
+  m += gameMedal(g).pts;
+  m += huntMedal(g).pts;
+  return Math.round(m);
+}
+const miranGames = games => (games || []).reduce((t, g) => t + miranOfGame(g), 0);
+const MIRAN_TITLE_PTS = 1000;
+const miranTotal = games => miranGames(games) + earnedTitles(games).length * MIRAN_TITLE_PTS;
+
+/* ---------- سُلَّم لا نهائي مسمّى ----------
+   يبني على rankOn ويكمل بنجوم بعد آخر رتبة مسمّاة، فلا يقف التقدّم أبدًا. */
+function endlessRank(ladder, score, step) {
+  const s = Math.max(0, Number(score) || 0);
+  const top = ladder[ladder.length - 1];
+  if (s < top[0]) {
+    const r = rankOn(ladder, s);
+    return { score: s, name: r.name, icon: r.icon, stars: 0, pct: r.pct, next: r.next, nextAt: r.nextAt };
+  }
+  const stars = Math.floor((s - top[0]) / step);
+  const into = (s - top[0]) % step;
+  return {
+    score: s, name: top[1], icon: top[2], stars: stars,
+    pct: Math.min(100, into / step * 100),
+    next: top[1] + " " + "⭐".repeat(Math.min(3, stars + 1)), nextAt: top[0] + (stars + 1) * step
+  };
+}
+
+/* رتبة المِران — تحلّ محلّ خمسة سلالم: المستوى ورتبة اللعب ورتبتَي العالمين والأركيد */
+const MIRAN_RANKS = [
+  [0, "عابر", "🚶"], [500, "صاحب جلسة", "🎮"], [1300, "مُواظِب", "📅"],
+  [2600, "مُتمرّس", "🎯"], [4500, "ابن الصنعة", "🧩"], [7200, "غوّاص", "🤿"],
+  [11000, "مُتقِن", "💠"], [16000, "أُسطى", "⚒️"], [23000, "مُعلّم", "📜"],
+  [32000, "شيخ المِران", "🕯️"], [45000, "أسطورة حيّة", "🐉"], [62000, "خالد", "☄️"]
+];
+const MIRAN_STAR = 25000;
+const miranRankOf = games => endlessRank(MIRAN_RANKS, miranTotal(games), MIRAN_STAR);
+
+/* ---------- سلّم الرفّ ----------
+   ساعاتك في ألعاب القصّة التي لم تختمها. جهدٌ حقيقي جلستَه، وما ينقصه إلا الاسم.
+   ⚠️ هذه هويّة واعتراف لا نقاط مضاعفة — الساعات محسوبة في المِران أصلًا.
+   والألعاب بلا نهاية مستثناة: لا تأخير في ما لا يُختَم. */
+const SHELF_RANKS = [
+  [0, "رفّك فاضي", "✨"], [25, "خبير الشاشة الافتتاحية", "🎬"], [75, "صديق الفصل الأول", "📖"],
+  [150, "بُكرة أكمّلها", "⏸️"], [300, "أمين الرفّ", "🗄️"], [600, "سلطان المؤجَّل", "🌙"],
+  [1000, "شيخ التسويف", "🧙"], [1500, "أسطورة «إن شاء الله أكمّلها»", "☄️"]
+];
+const isPending = g => !!g && !isShell(g) && !isEndless(g) && fullRuns(g) === 0 && realPlayHours(g) >= 1;
+const shelfHours = games => (games || []).filter(isPending).reduce((t, g) => t + realPlayHours(g), 0);
+const shelfRankOf = games => endlessRank(SHELF_RANKS, shelfHours(games), 750);
+
+/* ---------- رتبة الصيد ---------- */
+const HUNT_RANKS = [
+  [0, "مُتعقّب", "🔍"], [1000, "صيّاد", "🏹"], [4000, "قنّاص الشارات", "🎯"],
+  [10000, "جامع الأطقم", "💎"], [20000, "سيّد الصيد", "👑"]
+];
+const huntScore = games => (games || []).reduce((t, g) => t + raGamePoints(g), 0);
+const huntRankOf = games => endlessRank(HUNT_RANKS, huntScore(games), 8000);
+
+/* ═══════════ الألقاب ═══════════
+   اثنا عشر لقبًا عامًّا وأربعة للصيد — لا أكثر. قلّتها هي قيمتها: نظام شخصي بلا
+   جمهور، فاللقب ليس ما تعرضه للناس بل ما تُعرّف به نفسك، وأن يكون بين مئتَي لعبة
+   ثلاثٌ مذهّبة هو ما يجعل التذهيب يعني شيئًا لك.
+   ولا واحد من الاثني عشر يذكر جهازًا ولا يحتاج حساب RetroAchievements. */
+const yearOf = v => String(v || "").slice(0, 4);
+/* السنوات التي لعبتَ فيها لعبةً بعينها */
+function playYears(g) {
+  const y = new Set();
+  for (const s of ((g && g.sessions) || [])) if (s && s.at && s.src !== "backfill") y.add(yearOf(localDay(s.at)));
+  for (const r of ((g && g.playthroughs) || [])) if (r && r.date) y.add(yearOf(r.date));
+  y.delete("");
+  return y.size;
+}
+/* مجموع ساعات محور واحد: نوع أو عائلة جهاز أو حقبة */
+function axisHours(games, pick) {
+  const m = {};
+  for (const g of (games || [])) {
+    if (!g || isShell(g)) continue;
+    const k = pick(g);
+    if (!k) continue;
+    m[k] = (m[k] || 0) + Math.max(0, realPlayHours(g));
+  }
+  return m;
+}
+const maxOf = m => Object.keys(m).reduce((b, k) => Math.max(b, m[k]), 0);
+const genreHours = games => {
+  const m = {};
+  for (const g of (games || [])) {
+    if (!g || isShell(g)) continue;
+    const h = Math.max(0, realPlayHours(g));
+    if (h <= 0) continue;
+    for (const k of Object.keys(GENRE_RX)) if (hasGenre(g, k)) m[k] = (m[k] || 0) + h;
+  }
+  return m;
+};
+
+const TITLES = [
+  { id: "returner", icon: "🔁", name: "العائد", req: "أعدت ختم ٥ ألعاب مختلفة",
+    check: g => g.filter(x => fullRuns(x) >= 2).length >= 5 },
+  { id: "diver", icon: "🤿", name: "الغوّاص", req: "٣٠٠ ساعة في لعبة واحدة",
+    check: g => g.some(x => realPlayHours(x) >= 300) },
+  { id: "gilder", icon: "✨", name: "المُذهِّب", req: "٥ ألعاب مذهّبة",
+    check: g => g.filter(x => gameMedal(x).gild > 0).length >= 5 },
+  { id: "faithful", icon: "🕰️", name: "الوفيّ", req: "لعبة عدت إليها في ٣ سنوات مختلفة",
+    check: g => g.some(x => playYears(x) >= 3) },
+  { id: "genre_son", icon: "🧬", name: "ابن النوع", req: "٥٠٠ ساعة في نوع واحد",
+    check: g => maxOf(genreHours(g)) >= 500 },
+  { id: "plat_son", icon: "🕹️", name: "ابن الجهاز", req: "٥٠٠ ساعة على جهاز واحد",
+    check: g => maxOf(axisHours(g, x => x.platform)) >= 500 },
+  { id: "era_son", icon: "🏛️", name: "ابن الحقبة", req: "٥٠٠ ساعة في جيل واحد",
+    check: g => maxOf(axisHours(g, x => eraOf(x.platform) ? "g" + eraOf(x.platform) : "")) >= 500 },
+  { id: "season", icon: "⚽", name: "صاحب الموسم", req: "٢٠٠ ساعة في لعبة بلا نهاية",
+    check: g => g.some(x => isEndless(x) && realPlayHours(x) >= 200) },
+  { id: "reconciled", icon: "❤️‍🩹", name: "صالحتها", req: "٥ ألعاب هجرتها ثم عدت وختمتها",
+    check: g => g.filter(x => { const t = ghostTag(x); return t && t.state === "redeemed"; }).length >= 5 },
+  { id: "one_sitting", icon: "🕹️", name: "ابن الجلسة الواحدة", req: "٥ ألعاب من الجيل ١–٤ ختمتها بجلسة متّصلة",
+    check: g => g.filter(x => eraOf(x.platform) >= 1 && eraOf(x.platform) <= 4 && beatInOneSitting(x)).length >= 5 },
+  { id: "sizes", icon: "📏", name: "جامع الأحجام", req: "ختمت لعبة من كل صنف طول",
+    check: g => new Set(allRuns(g).map(r => r.size[1])).size >= RUN_SIZES.length },
+  { id: "habit", icon: "📿", name: "صاحب العادة", req: "٣٠ يومًا متتالية فيها لعب",
+    check: g => streakOf(g) >= 30 }
+];
+const HUNT_TITLES = [
+  { id: "hunter", icon: "🏹", name: "الصيّاد", req: "١٠٠٠ إنجاز RetroAchievements",
+    check: g => g.filter(raShows).reduce((n, x) => n + raEarnedCount(x), 0) >= 1000 },
+  { id: "flawless", icon: "🔥", name: "بلا خدش", req: "أتقنت لعبة كاملة في Hardcore",
+    check: g => g.some(x => huntMedal(x).key === "clean") },
+  { id: "again", icon: "🔁", name: "المُعاود", req: "كسبت نفس الإنجاز ٣ مرات",
+    check: g => g.some(x => raShows(x) && raAchList(x).some(a => a.earned && raAchTimes(x, a.id) >= 3)) },
+  { id: "setmaster", icon: "💎", name: "سيّد الأطقم", req: "١٠ ألعاب أتقنت كل إنجازاتها",
+    check: g => g.filter(x => raIsMastered(x) && raShows(x)).length >= 10 }
+];
+const ALL_TITLES = TITLES.concat(HUNT_TITLES);
+function earnedTitles(games) {
+  const list = (games || []).filter(x => x && !isShell(x));
+  return ALL_TITLES.filter(t => { try { return t.check(list); } catch (e) { return false; } });
+}
+
+/* ═══════════ المِحكّات ═══════════
+   عتبات تتصاعد بلا نهاية على المحاور الخمسة. تُولَّد آليًا من بياناتك — لا قوائم
+   طويلة تُكتب يدويًا، فكل نوع وجهاز وحقبة وصنف تختيمة يتقدّم وحده كلما لعبت. */
+const TRIAL_STEPS = [10, 25, 50, 100, 200, 350, 500, 750, 1000];
+const TRIAL_STEP_AFTER = 500;
+function trialTier(v) {
+  const x = Math.max(0, Number(v) || 0);
+  let i = 0;
+  while (i < TRIAL_STEPS.length && x >= TRIAL_STEPS[i]) i++;
+  if (i < TRIAL_STEPS.length) return { tier: i, next: TRIAL_STEPS[i] };
+  const extra = Math.floor((x - TRIAL_STEPS[TRIAL_STEPS.length - 1]) / TRIAL_STEP_AFTER) + 1;
+  return { tier: TRIAL_STEPS.length + extra - 1, next: TRIAL_STEPS[TRIAL_STEPS.length - 1] + extra * TRIAL_STEP_AFTER };
+}
+/* يرجع مِحكّات كل محور مرتّبةً بالأعلى قيمة */
+function trialsOf(games) {
+  const list = (games || []).filter(x => x && !isShell(x));
+  const mk = (axis, icon, m, unit) => Object.keys(m)
+    .filter(k => m[k] >= 1)
+    .map(k => {
+      const v = Math.round(m[k]);
+      const t = trialTier(v);
+      return { axis: axis, icon: icon, label: k, value: v, unit: unit, tier: t.tier, next: t.next };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  const byGame = {};
+  for (const g of list) { const h = realPlayHours(g); if (h >= 1) byGame[g.name] = h; }
+  const byGenre = {};
+  const gh = genreHours(list);
+  for (const k of Object.keys(gh)) byGenre[GENRE_LABELS[k] || k] = gh[k];
+  const byEra = {};
+  const eh = axisHours(list, x => eraOf(x.platform) ? "الجيل " + eraOf(x.platform) : "");
+  for (const k of Object.keys(eh)) byEra[k] = eh[k];
+  const bySize = {};
+  for (const r of allRuns(list)) bySize[r.size[2] + " " + r.size[1]] = (bySize[r.size[2] + " " + r.size[1]] || 0) + 1;
+
+  return {
+    game: mk("لعبة", "🎯", byGame, "ساعة"),
+    genre: mk("نوع", "🧬", byGenre, "ساعة"),
+    platform: mk("جهاز", "🕹️", axisHours(list, x => x.platform), "ساعة"),
+    era: mk("حقبة", "🏛️", byEra, "ساعة"),
+    size: mk("صنف التختيمة", "📏", bySize, "تختيمة")
+  };
+}
+
 function baseXp(games) {
   let xp = 0;
   for (const g of (games || [])) {
@@ -5550,7 +5817,7 @@ function AchievementsView({
     " فقط. مستواك ونقاط خبرتك تبقى موحَّدة من مكتبتك كاملة، وكذلك فتح الأوسمة."),
   /*#__PURE__*/React.createElement("div", {
     className: "atabs"
-  }, [["overview", "📊 نظرة عامة"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["granks", "🎖️ رتب ألعابي"], ["ranks", "🏆 الرتب"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+  }, [["overview", "📊 نظرة عامة"], ["miran", "🎖️ المِران"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["granks", "🎖️ رتب ألعابي"], ["ranks", "🏆 الرتب"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
     key: k,
     className: "atab" + (tab === k ? " on" : ""),
     onClick: () => setTab(k)
@@ -6053,6 +6320,80 @@ function AchievementsView({
     }, /*#__PURE__*/React.createElement("span", { className: "bw-ic" }, b.hidden && !b.done ? "❓" : b.icon),
       /*#__PURE__*/React.createElement("b", null, b.hidden && !b.done ? "وسام خفي" : b.title),
       /*#__PURE__*/React.createElement("span", { className: "bw-d" }, b.hidden && !b.done ? "افتحه لتكتشفه…" : b.desc))))),
+  /* ═══════════ تبويب المِران ═══════════
+     الرتب الثلاث والألقاب والمِحكّات في مكان واحد. النظام القديم (المستوى والرتب)
+     ما زال قائمًا في تبويباته — لا شيء حُذف، فتقارن وتقرّر. */
+  tab === "miran" && (() => {
+    const E = React.createElement;   /* الاسم العام يُعرَّف بعد هذا المكوّن */
+    const real = realGames(games);
+    const rk = miranRankOf(real), sh = shelfRankOf(real), hn = huntRankOf(real);
+    const titles = earnedTitles(real);
+    const got = new Set(titles.map(t => t.id));
+    const tr = trialsOf(real);
+    const pend = real.filter(isPending).sort((a, b) => realPlayHours(b) - realPlayHours(a));
+    const gilded = real.filter(g => gameMedal(g).gild > 0).length;
+    const mastered = real.filter(g => gameMedal(g).tier === 3).length;
+    const AXES = [["game", "🎯 أعمق الألعاب"], ["genre", "🧬 الأنواع"], ["platform", "🕹️ الأجهزة"], ["era", "🏛️ الحقب"], ["size", "📏 أصناف التختيمات"]];
+
+    const rankCard = (r, label, unit, cls) => E("div", { className: "mrank " + (cls || "") },
+      E("span", { className: "mr-ic" }, r.icon),
+      E("div", { className: "mr-i" },
+        E("b", null, r.name, r.stars ? " " + "⭐".repeat(Math.min(5, r.stars)) + (r.stars > 5 ? "×" + r.stars : "") : ""),
+        E("small", null, label, " • ", r.score.toLocaleString("ar"), " ", unit)),
+      E("div", { className: "mr-bar" }, E("div", { className: "mr-fill", style: { width: Math.round(r.pct) + "%" } })),
+      r.next ? E("small", { className: "mr-next" }, "التالية: ", r.next, " عند ", Number(r.nextAt).toLocaleString("ar")) : null);
+
+    return E("div", null,
+      E("div", { className: "mrank-wrap" },
+        rankCard(rk, "رتبتك", "مِران", "main"),
+        rankCard(hn, "الصيد", "نقطة"),
+        rankCard(sh, "الرفّ", "ساعة", "shelf")),
+
+      E("div", { className: "ach-sum", style: { marginTop: 12 } },
+        [["🥇", mastered, "أتقنتها", "#f5b942"], ["✨", gilded, "مذهّبة", "#fb923c"],
+         ["🏅", titles.length + "/" + ALL_TITLES.length, "ألقاب", "#a78bfa"],
+         ["📚", pend.length, "مُعلَّقة", "#22d3ee"]]
+          .map(([ic, v, l, col], i) => E("div", { className: "ach-sum-cell", key: i },
+            E("span", { className: "as-ic" }, ic),
+            E("b", { style: { color: col } }, v),
+            E("span", null, l)))),
+
+      E("div", { className: "section-title" }, "🏅 الألقاب"),
+      E("div", { className: "title-grid" }, ALL_TITLES.map(t => E("div", {
+        key: t.id, className: "ttl-card" + (got.has(t.id) ? " on" : "")
+      },
+        E("span", { className: "tc-ic" }, t.icon),
+        E("div", { className: "tc-i" }, E("b", null, t.name), E("small", null, t.req)),
+        got.has(t.id) ? E("span", { className: "tc-ok" }, "✓") : null))),
+
+      E("div", { className: "section-title" }, "📊 المِحكّات"),
+      E("p", { className: "bk-desc" },
+        "عتبات تتصاعد بلا نهاية، تُولَّد من لعبك لا من قوائم مكتوبة. الجهاز والحقبة بالساعات وحدها — عدد الألعاب اقتناء لا لعب."),
+      AXES.map(([k, label]) => tr[k].length ? E("div", { key: k, className: "trial-grp" },
+        E("div", { className: "chall-k" }, label),
+        tr[k].slice(0, 5).map((x, i) => E("div", { className: "trial", key: i },
+          E("div", { className: "tr-top" },
+            E("span", { className: "tr-l" }, x.label),
+            E("b", null, x.value.toLocaleString("ar"), " ", x.unit)),
+          E("div", { className: "mr-bar" },
+            E("div", { className: "mr-fill", style: { width: Math.min(100, Math.round(x.value / x.next * 100)) + "%" } })),
+          E("small", { className: "tr-n" }, "المستوى ", x.tier, " • التالي عند ", x.next.toLocaleString("ar"))))
+      ) : null),
+
+      pend.length ? E(React.Fragment, null,
+        E("div", { className: "section-title" }, "🗄️ رفّك"),
+        E("p", { className: "bk-desc" },
+          "ساعات جلستها فعلًا في ألعاب لم تختمها بعد — ليست ضائعة، لها اسمها ورتبتها. ",
+          "وأن تعود لواحدة منها وتختمها يعطي مِرانًا مضاعفًا."),
+        E("div", { className: "shelf-list" }, pend.slice(0, 12).map(g => {
+          const t = ghostTag(g);
+          return E("button", { key: g.id, className: "shelf-row", onClick: () => onOpenGame(g.id) },
+            E("div", { className: "sr-i" },
+              E("b", null, g.name),
+              E("small", null, t ? t.icon + " " + t.name : "لم تُختَم بعد")),
+            E("span", { className: "sr-h" }, fmtHours(realPlayHours(g))));
+        }))) : null);
+  })(),
   tab === "racheevos" && (() => {
     const raAll = games.filter(g => raShows(g) && raAchList(g).length);
     const raPlats = [...new Set(raAll.map(g => g.platform))].sort();
@@ -9907,6 +10248,63 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 /* ===== إنجازات RetroAchievements: التكرار والربط اليدوي =====
    ملاحظة: هذه كلها حاويات عمودية أو صفوف مستقلة — لا تستخدم .track لأي منها،
    فهي flex صف وتسحق الأعمدة حتى يظهر النص حرفًا في كل سطر (خطأ ٥ في AGENTS.md). */
+/* ===== تبويب المِران: الرتب الثلاث والألقاب والمِحكّات =====
+   ⚠️ كلها حاويات عمودية — لا .track هنا (خطأ ٥: flex صف يسحق الأعمدة). */
+.mrank-wrap{ display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; margin-top:12px; }
+.mrank{
+  display:grid; grid-template-columns:auto 1fr; gap:4px 11px; align-items:center;
+  padding:14px 15px; border-radius:var(--r2); border:1px solid var(--line);
+  background:var(--s1);
+}
+.mrank.main{ border-color:rgba(245,185,66,.4); background:rgba(245,185,66,.07); }
+.mrank.shelf{ border-color:rgba(34,211,238,.3); background:rgba(34,211,238,.06); }
+.mrank .mr-ic{ font-size:26px; line-height:1; grid-row:span 2; }
+.mrank .mr-i{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.mrank .mr-i b{ font-size:14px; line-height:1.4; }
+.mrank .mr-i small{ font-size:10.5px; color:var(--txt-4); font-family:var(--num); }
+.mrank.main .mr-i b{ color:#f5b942; }
+.mr-bar{ grid-column:1 / -1; height:5px; border-radius:999px; background:var(--well); overflow:hidden; margin-top:6px; }
+.mr-fill{ height:100%; background:linear-gradient(90deg,#f5b942,#ffd479); transition:width .5s var(--ease); }
+.mrank.shelf .mr-fill{ background:linear-gradient(90deg,#22d3ee,#7de3ff); }
+.mr-next{ grid-column:1 / -1; font-size:10px; color:var(--txt-4); margin-top:3px; }
+
+/* الألقاب */
+.title-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:8px; }
+.ttl-card{
+  display:flex; align-items:flex-start; gap:10px; padding:12px 13px;
+  border-radius:var(--r2); border:1px solid var(--line); background:var(--s1); opacity:.55;
+}
+.ttl-card.on{ opacity:1; border-color:rgba(167,139,250,.45); background:rgba(167,139,250,.08); }
+.ttl-card .tc-ic{ font-size:21px; line-height:1; flex:none; filter:grayscale(1); }
+.ttl-card.on .tc-ic{ filter:none; }
+.ttl-card .tc-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.ttl-card .tc-i b{ font-size:13px; }
+.ttl-card .tc-i small{ font-size:10.5px; color:var(--txt-4); line-height:1.5; }
+.ttl-card.on .tc-i b{ color:#a78bfa; }
+.ttl-card .tc-ok{ flex:none; color:#4ade80; font-weight:800; font-size:14px; }
+
+/* المِحكّات */
+.trial-grp{ display:flex; flex-direction:column; gap:7px; margin-bottom:14px; }
+.trial{ display:flex; flex-direction:column; gap:2px; padding:10px 12px;
+  border-radius:var(--r2); border:1px solid var(--line); background:var(--s1); }
+.trial .tr-top{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+.trial .tr-l{ font-size:12.5px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.trial .tr-top b{ font-family:var(--num); font-size:12px; color:#f5b942; flex:none; }
+.trial .tr-n{ font-size:10px; color:var(--txt-4); }
+
+/* الرفّ */
+.shelf-list{ display:flex; flex-direction:column; gap:6px; }
+.shelf-row{
+  display:flex; align-items:center; gap:11px; width:100%; text-align:start;
+  padding:11px 13px; border-radius:var(--r2); border:1px solid var(--line);
+  background:var(--s1); color:var(--txt-1); cursor:pointer; font-family:inherit;
+  transition:border-color .15s var(--ease), background .15s var(--ease);
+}
+.shelf-row:hover{ border-color:rgba(34,211,238,.4); background:rgba(34,211,238,.06); }
+.shelf-row .sr-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.shelf-row .sr-i b{ font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shelf-row .sr-i small{ font-size:10.5px; color:var(--txt-4); }
+.shelf-row .sr-h{ flex:none; font-family:var(--num); font-size:12.5px; font-weight:800; color:#22d3ee; }
 /* ===== نظام المِران: وسام اللعبة ووسم السَّحب =====
    ⚠️ لا تستخدم .track لأي حاوية هنا — هي flex صف وتسحق الأعمدة (خطأ ٥). */
 .card-medal{
