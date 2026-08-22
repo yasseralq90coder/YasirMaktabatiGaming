@@ -7,7 +7,7 @@
 
 /* ⚠️ ارفع هذا الرقم مع أي تغيير في الملفات المخزَّنة، وإلا بقي المستخدم على
    نسخة قديمة: قاعدة activate تحذف كل كاش اسمه مختلف، فبلا تغيير الاسم لا يُحذف شيء. */
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE_NAME = "gamelib-" + CACHE_VERSION;
 const SHELL_FILES = [
   "./",
@@ -51,8 +51,11 @@ self.addEventListener("fetch", event => {
   const isAppShell = url.origin === self.location.origin;
 
   if (isAppShell && (url.pathname.endsWith("/") || url.pathname.endsWith("index.html"))) {
+    /* ⚠️ cache:"no-cache" ضروري لا تجميلي: GitHub Pages يرسل max-age، فـfetch
+       العادي يُخدَم من كاش المتصفح نفسه قبل أن يصل الطلب للخادم — فيبقى المستخدم
+       على HTML قديم رغم أن "الشبكة أولًا" تبدو صحيحة. هذا يفرض إعادة التحقّق. */
     event.respondWith(
-      fetch(req).then(res => {
+      fetch(new Request(req.url, { cache: "no-cache", credentials: "same-origin" })).then(res => {
         caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
         return res;
       }).catch(() => caches.match(req).then(r => r || caches.match("./index.html")))
