@@ -1566,6 +1566,20 @@ const MIRAN_RANKS = [
 ];
 const MIRAN_STAR = 25000;
 const miranRankOf = games => endlessRank(MIRAN_RANKS, miranTotal(games), MIRAN_STAR);
+/* عدد صحيح تصاعدي يمثّل درجتك — يحلّ محلّ رقم المستوى في سجل الترقّي والاحتفال،
+   فالمقارنة «هل ارتقيتُ؟» تحتاج رقمًا لا اسمًا. */
+function miranTier(games) {
+  const r = miranRankOf(games);
+  const i = MIRAN_RANKS.findIndex(x => x[1] === r.name);
+  return (i < 0 ? 0 : i) + 1 + (r.stars || 0);
+}
+/* الاسم والأيقونة من الدرجة — الاتجاه المعاكس، لعرض إدخالات السجل القديمة */
+function miranTierName(tier) {
+  const i = Math.max(1, Number(tier) || 1) - 1;
+  if (i < MIRAN_RANKS.length) return { name: MIRAN_RANKS[i][1], icon: MIRAN_RANKS[i][2], stars: 0, fresh: true };
+  const top = MIRAN_RANKS[MIRAN_RANKS.length - 1];
+  return { name: top[1], icon: top[2], stars: i - MIRAN_RANKS.length + 1, fresh: false };
+}
 
 /* ---------- سلّم الرفّ ----------
    ساعاتك في ألعاب القصّة التي لم تختمها. جهدٌ حقيقي جلستَه، وما ينقصه إلا الاسم.
@@ -1957,14 +1971,15 @@ function LevelUpFx({ entry, onDone }) {
     return () => clearTimeout(t);
   }, [entry]);
   if (!entry) return null;
-  const rk = rankOf(entry.level);
-  const newTitle = RANKS.some(r => r[0] === entry.level);
+  const t = miranTierName(entry.level);
+  const rk = [0, t.name + (t.stars ? " " + "⭐".repeat(Math.min(3, t.stars)) : ""), t.icon];
+  const newTitle = t.fresh;
   return /*#__PURE__*/React.createElement("div", { className: "lvlfx", onClick: onDone },
     /*#__PURE__*/React.createElement("div", { className: "lvlfx-conf" }, [...Array(24)].map((_, i) => /*#__PURE__*/React.createElement("i", { key: i, style: { left: (i * 41 % 100) + "%", animationDelay: (i * 0.13 % 1.6) + "s", background: ["#f5b942", "#22d3ee", "#a78bfa", "#4ade80", "#f472b6"][i % 5] } }))),
     /*#__PURE__*/React.createElement("div", { className: "lvlfx-card" },
       /*#__PURE__*/React.createElement("div", { className: "lvlfx-ic" }, rk[2]),
-      /*#__PURE__*/React.createElement("div", { className: "lvlfx-lv" }, "المستوى ", entry.level),
-      /*#__PURE__*/React.createElement("div", { className: "lvlfx-rk" }, newTitle ? "🎊 لقب جديد: " + rk[1] : rk[1]),
+      /*#__PURE__*/React.createElement("div", { className: "lvlfx-lv" }, "الرتبة ", entry.level),
+      /*#__PURE__*/React.createElement("div", { className: "lvlfx-rk" }, newTitle ? "🎊 رتبة جديدة: " + rk[1] : rk[1]),
       entry.game && /*#__PURE__*/React.createElement("div", { className: "lvlfx-sub" }, "بطل المرحلة: " + entry.game + " (" + fmtHours(entry.hours) + ")"),
       /*#__PURE__*/React.createElement("div", { className: "lvlfx-tap" }, "اضغط للمتابعة")));
 }
@@ -5474,9 +5489,11 @@ function drawGamercard(games, lvl) {
   x.font = "bold 46px sans-serif";
   x.fillText("🕹️ مكتبتي الجيمرية", W - 50, 90);
   x.fillStyle = "#f5b942"; x.font = "bold 40px sans-serif";
-  x.fillText("Lv." + lvl.level + (prestigeOf(lvl.level) ? " " + prestigeStars(lvl.level) : "") + "  •  " + rk[2] + " " + rk[1], W - 50, 160);
+  { const mr = miranRankOf(realGames(games));
+    x.fillText(mr.icon + " " + mr.name + (mr.stars ? " " + "⭐".repeat(Math.min(3, mr.stars)) : "") + "  •  " + mr.score.toLocaleString("ar") + " مِران", W - 50, 160); }
   x.fillStyle = "#7de3ff"; x.font = "bold 30px sans-serif";
-  x.fillText("رتبة اللعب: " + gr.name, W - 50, 215);
+  { const sh = shelfRankOf(realGames(games)), hn = huntRankOf(realGames(games));
+    x.fillText("الرفّ: " + sh.name + "  •  الصيد: " + hn.name, W - 50, 215); }
   x.fillStyle = "#cdd0e0"; x.font = "28px sans-serif";
   const rows = [
     "🎮 " + realGames(games).length + " لعبة في المكتبة",
@@ -5876,7 +5893,7 @@ function AchievementsView({
     const pool = [...ach.tracks, ...ach.series.filter(s => s.value > 0 && !s.maxed)];
     return pool.sort((a, b) => b.pct - a.pct)[0];
   }, [ach]);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState("miran");
   const [rSort, setRSort] = useState("date");
   const [ragOpen, setRagOpen] = useState("");
   const [ragPlat, setRagPlat] = useState("all");
@@ -5897,7 +5914,7 @@ function AchievementsView({
     " فقط. مستواك ونقاط خبرتك تبقى موحَّدة من مكتبتك كاملة، وكذلك فتح الأوسمة."),
   /*#__PURE__*/React.createElement("div", {
     className: "atabs"
-  }, [["overview", "📊 نظرة عامة"], ["miran", "🎖️ المِران"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["granks", "🎖️ رتب ألعابي"], ["ranks", "🏆 الرتب"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+  }, [["miran", "🎖️ المِران"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["overview", "📜 الأرشيف"], ["granks", "📜 رتب ألعابي"], ["ranks", "📜 الرتب القديمة"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
     key: k,
     className: "atab" + (tab === k ? " on" : ""),
     onClick: () => setTab(k)
@@ -6026,7 +6043,8 @@ function AchievementsView({
       className: "gcard-logo"
     }, "🕹️"), /*#__PURE__*/React.createElement("span", {
       className: "gcard-lvl"
-    }, "Lv.", lvl.level, prestigeOf(lvl.level) > 0 ? " " + prestigeStars(lvl.level) : "")), /*#__PURE__*/React.createElement("div", {
+    }, (() => { const mr = miranRankOf(realGames(games));
+        return mr.icon + " " + mr.name + (mr.stars ? " " + "⭐".repeat(Math.min(3, mr.stars)) : ""); })())), /*#__PURE__*/React.createElement("div", {
       className: "gcard-name"
     }, "ياسر جيمر"), /*#__PURE__*/React.createElement("div", {
       className: "gcard-sub"
@@ -6252,7 +6270,7 @@ function AchievementsView({
       key: i,
       className: "ach-run silver",
       style: { display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 8 }
-    }, /*#__PURE__*/React.createElement("div", { className: "rank-badge" }, "Lv." + e.level),
+    }, /*#__PURE__*/React.createElement("div", { className: "rank-badge" }, miranTierName(e.level).icon + " " + miranTierName(e.level).name),
       /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
         /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, lineHeight: 1.6 } }, e.msg),
         /*#__PURE__*/React.createElement("div", { style: { opacity: .7, fontSize: 12, marginTop: 4 } }, String(e.at || "").slice(0, 10) + (e.game ? " • " + e.game + " • " + fmtHours(e.hours) : "")))))
@@ -8831,6 +8849,9 @@ function App() {
   const scoped = useMemo(() => scopeGames(games, scope), [games, scope]);
   const scopedAch = useMemo(() => scope === "all" ? ach : computeAchievements(realGames(scoped)), [ach, scoped, scope]);
   /* رتبتان مستقلّتان: واحدة لكل عالم، تظهران معًا في «الكل» */
+  /* رتبة المِران — صارت الرتبة الرئيسية في الشريط العلوي بدل المستوى.
+     النظام القديم (levelInfo/xp) باقٍ في تبويب «📜 الأرشيف» ولم يُحذف. */
+  const mrank = useMemo(() => miranRankOf(realGames(games)), [games]);
   const worldRanks = useMemo(() => ({
     original: worldRankOf(games, "original"),
     emulator: worldRankOf(games, "emulator"),
@@ -8893,7 +8914,7 @@ function App() {
         rec.fixedTop = 1;
         try { await sset(KEY_LEVELLOG, rec); } catch (e) {}
       }
-      const cur = levelInfo(totalXp(gamesRef.current || [])).level;
+      const cur = miranTier(realGames(gamesRef.current || []));
       if (!rec || typeof rec.lastLevel !== "number") {
         rec = { lastLevel: cur, lastAt: nowISO(), entries: (rec && rec.entries) || [] };
         await sset(KEY_LEVELLOG, rec); setLevelLog(rec.entries); return;
@@ -8999,21 +9020,22 @@ function App() {
     className: "brand-title"
   }, "مكتبتي الجيمرية"), /*#__PURE__*/React.createElement("div", {
     className: "brand-sub"
-  }, realGames(games).length, " لعبة • ", rank[1], (() => { const st = playStreakOf(games); return st.cur > 0 ? " • 🔥" + st.cur : ""; })()))), /*#__PURE__*/React.createElement("div", {
+  }, realGames(games).length, " لعبة • ", mrank.name, (() => { const st = playStreakOf(games); return st.cur > 0 ? " • 🔥" + st.cur : ""; })()))), /*#__PURE__*/React.createElement("div", {
     className: "mini-level",
     onClick: () => setView("stats")
   }, /*#__PURE__*/React.createElement("span", {
     className: "ml-rank"
-  }, rank[2]), /*#__PURE__*/React.createElement("div", {
+  }, mrank.icon), /*#__PURE__*/React.createElement("div", {
     className: "ml-bar"
   }, /*#__PURE__*/React.createElement("div", {
     className: "ml-fill",
     style: {
-      width: lvl.pct + "%"
+      width: mrank.pct + "%"
     }
   })), /*#__PURE__*/React.createElement("span", {
-    className: "ml-num"
-  }, "Lv.", lvl.level, prestigeOf(lvl.level) > 0 ? " " + prestigeStars(lvl.level) : ""))), /*#__PURE__*/React.createElement("nav", {
+    className: "ml-num", title: mrank.score.toLocaleString("ar") + " مِران"
+  }, Math.round(mrank.score / 1000) >= 1 ? Math.round(mrank.score / 1000) + "ك" : mrank.score,
+    mrank.stars > 0 ? " " + "⭐".repeat(Math.min(3, mrank.stars)) : ""))), /*#__PURE__*/React.createElement("nav", {
     className: "tabs"
   }, /*#__PURE__*/React.createElement("button", { className: view === "library" ? "on" : "", onClick: () => go("library") }, /*#__PURE__*/React.createElement("i", null, "📚"), /*#__PURE__*/React.createElement("em", null, "المكتبة")), /*#__PURE__*/React.createElement("button", { className: view === "stats" ? "on" : "", onClick: () => go("stats") }, /*#__PURE__*/React.createElement("i", null, "🏆"), /*#__PURE__*/React.createElement("em", null, "الإنجازات")), /*#__PURE__*/React.createElement("button", { className: view === "insights" ? "on" : "", onClick: () => go("insights") }, /*#__PURE__*/React.createElement("i", null, "📊"), /*#__PURE__*/React.createElement("em", null, "الإحصائيات")), /*#__PURE__*/React.createElement("button", { className: view === "backup" ? "on" : "", onClick: () => go("backup") }, /*#__PURE__*/React.createElement("i", null, "⚙️"), /*#__PURE__*/React.createElement("em", null, "الإعدادات"))), view !== "backup" && /*#__PURE__*/React.createElement(ScopeBar, {
     scope: scope,
@@ -9105,8 +9127,8 @@ function App() {
     const R = 24, C = 2 * Math.PI * R;
     return /*#__PURE__*/React.createElement("div", { className: "pulse-bar" },
       /*#__PURE__*/React.createElement("div", { className: "pill" },
-        /*#__PURE__*/React.createElement("b", null, "Lv.", lvl.level), "المستوى",
-        /*#__PURE__*/React.createElement("span", { className: "lvlbar" }, /*#__PURE__*/React.createElement("i", { style: { width: lvl.pct + "%" } }))),
+        /*#__PURE__*/React.createElement("b", null, mrank.icon), mrank.name,
+        /*#__PURE__*/React.createElement("span", { className: "lvlbar" }, /*#__PURE__*/React.createElement("i", { style: { width: mrank.pct + "%" } }))),
       /*#__PURE__*/React.createElement("div", { className: "pill" + (streak > 0 ? " hot" : "") },
         "🔥 ", /*#__PURE__*/React.createElement("b", null, streak), "يوم متتالي"),
       /*#__PURE__*/React.createElement("div", { className: "pill" },
