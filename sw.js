@@ -7,7 +7,7 @@
 
 /* ⚠️ ارفع هذا الرقم مع أي تغيير في الملفات المخزَّنة، وإلا بقي المستخدم على
    نسخة قديمة: قاعدة activate تحذف كل كاش اسمه مختلف، فبلا تغيير الاسم لا يُحذف شيء. */
-const CACHE_VERSION = "v9";
+const CACHE_VERSION = "v10";
 const CACHE_NAME = "gamelib-" + CACHE_VERSION;
 const SHELL_FILES = [
   "./",

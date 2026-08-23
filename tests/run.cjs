@@ -850,6 +850,18 @@ G("⑭ دمج نسختَي لعبة واحدة");
   eq(mapIds(C.mergeCandidates([A, B])), [["A", "B"]], "اختلاف حالة الأحرف لا يمنع الاقتراح");
   eq(C.mergeCandidates([A]).length, 0, "لعبة وحيدة ليست مرشّحًا");
   eq(C.mergeCandidates([A, game({ id: "C", name: "لعبة أخرى" })]).length, 0, "اسمان مختلفان ليسا مرشّحًا");
+  /* ⚠️ الحارس الأهمّ: المنصّة جزء من الهوية. Splinter Cell على جيم كيوب وعلى
+     إكسبوكس نسختان اشتُريتا لجهازين، وضمّهما يخلط تاريخين لا رجعة عنه. */
+  {
+    const gc = game({ id: "GC", name: "Tom Clancy's Splinter Cell", platform: "Nintendo GameCube", hours: 1 });
+    const xb = game({ id: "XB", name: "Tom Clancy's Splinter Cell", platform: "Xbox (الأصلي)", hours: 2 });
+    eq(C.mergeCandidates([gc, xb]).length, 0,
+      "نفس الاسم على منصّتين مختلفتين لا يُقترح — نسختان لا انقسام");
+    eq(C.mergeGames(gc, xb).hours, 1,
+      "وحارس ثانٍ في mergeGames: لا ضمّ عبر المنصّات ولو استُدعيت مباشرة");
+    const same = game({ id: "XB2", name: "Tom Clancy's Splinter Cell", platform: "Nintendo GameCube", hours: 2 });
+    eq(C.mergeCandidates([gc, same]).length, 1, "ونفس المنصّة يُقترح كالمعتاد");
+  }
   eq(C.mergeCandidates([A, game({ id: "S", name: "God of War", shell: true })]).length, 0,
     "غلاف المجموعة ليس نسخةً مكرَّرة");
   eq(C.mergeCandidates([A, game({ id: "K", name: "God of War", parentId: "A" })]).length, 0,
@@ -860,6 +872,10 @@ G("⑭ دمج نسختَي لعبة واحدة");
   const M = C.mergeGames(B, A);   // نُبقي سجلّ الجهاز الأصلي ونضمّ إليه المحاكي
   eq(M.id, "B", "الهدف يحتفظ بهويته");
   eq(M.hours, 8, "الساعات مجموع الاثنين — وإلا ضاع نصف وقتك");
+  /* دقّة خانتين: r1 كان يقرّب 3.25+0.72 إلى 4.0 والجلسات 3.97 — فيفترق حقل
+     الساعات عن مصدره لحظةَ بنائه. أرقام حقيقية من مكتبة المستخدم. */
+  eq(C.mergeGames(game({ hours: 3.25 }), game({ hours: 0.72 })).hours, 3.97,
+    "مجموع الساعات لا يُقرَّب فيفترق عن الجلسات");
   eq(M.sessions.length, 2, "الجلستان معًا");
   eq(M.sessions.map(x => x.hw), ["original", "emulator"], "مرتّبة بالتاريخ ومحتفظة بطريقة كلٍّ منها");
   eq(C.playedOn(M).sort(), ["emulator", "original"], "اللعبة المدموجة صارت على الطريقتين");

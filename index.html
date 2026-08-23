@@ -6751,19 +6751,28 @@ function migrateGame(g) {
 
    يبقى سجلّ الهدف هويةً (الاسم والمنصّة والغلاف) ويُضمّ إليه تاريخ المصدر. */
 const mergeKey = n => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+/* ⚠️ **المنصّة جزء من المفتاح.** الانقسام الذي نعالجه سببه طريقة التشغيل، وهي
+   لا تغيّر المنصّة: God of War مرّتين على PS2 سجلّ واحد انقسم. أما Splinter Cell
+   على جيم كيوب وعلى إكسبوكس فنسختان اشتُريتا لجهازين — إصداران مختلفان بأغلفة
+   وإنجازات وتاريخ منفصل. اقتراحُ ضمّهما خطرٌ لا يكفي فيه تحذيرٌ نصّي: الدمج
+   نقرةٌ واحدة لا رجعة عنها إلا بنسخة احتياطية، فالحارس في الشرط لا في النصّ. */
 function mergeCandidates(list) {
   const by = {};
   for (const g of (list || [])) {
     if (!g || isShell(g) || g.parentId) continue;
     const k = mergeKey(g.name);
     if (!k) continue;
-    (by[k] = by[k] || []).push(g);
+    const key = k + "|" + String(g.platform || "");
+    (by[key] = by[key] || []).push(g);
   }
   return Object.keys(by).filter(k => by[k].length > 1).map(k => by[k]);
 }
 /* يُرجع سجلًّا واحدًا يحمل تاريخ الاثنين. لا يحذف شيئًا — المستدعي يحذف المصدر. */
 function mergeGames(target, source) {
   if (!target || !source) return target;
+  /* حارس ثانٍ: الاقتراح يفلتر بالمنصّة، لكن الدالة قد تُستدعى من مسار آخر يومًا.
+     ضمّ لعبتين على جهازين مختلفين يخلط تاريخين لا رجعة عنه. */
+  if (String(target.platform || "") !== String(source.platform || "")) return target;
   const sess = [...(target.sessions || []), ...(source.sessions || [])]
     .sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
   /* التختيمات تُرقَّم من جديد بعد الدمج: الترقيم ترتيبٌ لا معرّف. */
@@ -6776,8 +6785,10 @@ function mergeGames(target, source) {
     ...target,
     sessions: sess,
     playthroughs: runs,
-    /* الساعات مجموع الاثنين لا ساعات الهدف — وإلا ضاع نصف وقتك بلا أثر. */
-    hours: r1((Number(target.hours) || 0) + (Number(source.hours) || 0)),
+    /* الساعات مجموع الاثنين لا ساعات الهدف — وإلا ضاع نصف وقتك بلا أثر.
+       ودقّة خانتين لا واحدة: r1 كان يحوّل 3.25+0.72 إلى 4.0 بينما الجلسات 3.97،
+       فيفترق حقل الساعات عن مصدره في نفس اللحظة التي يُبنى فيها (خطأ ١٤). */
+    hours: Math.round(((Number(target.hours) || 0) + (Number(source.hours) || 0)) * 100) / 100,
     scoreAttempts: [...(target.scoreAttempts || []), ...(source.scoreAttempts || [])],
     dateAdded: minDate(target.dateAdded, source.dateAdded),
     status: (target.status === "completed" || source.status === "completed") ? "completed" : target.status,
@@ -7766,8 +7777,8 @@ function BackupView({
   }, "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
   }, "النموذج القديم كان يجبرك على إدخال اللعبة مرّتين لو لعبتها على الجهاز الأصلي وعلى المحاكي. صار السجل الواحد يحمل الطريقتين، فهذه أداة لضمّ ما انقسم: تُجمَع الساعات والجلسات والتختيمات في سجلٍّ واحد. ",
-    /*#__PURE__*/React.createElement("b", null, "الاقتراح لا يعني التطابق"),
-    " — قد تكون النسختان إصدارين مختلفين فعلًا، فاختر بنفسك أيّهما يبقى."),
+    /*#__PURE__*/React.createElement("b", null, "نفس المنصّة فقط"),
+    " — نسختك على جهازين مختلفين شراءان منفصلان، ولا تُقترح للدمج."),
   mergeSets.length === 0
     ? /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, "لا نسخ مكرّرة في مكتبتك ✓")
     : mergeSets.map(set => /*#__PURE__*/React.createElement("div", { className: "mrg-set", key: set[0].id },
@@ -7783,7 +7794,7 @@ function BackupView({
               playedOn(g).length ? " • " + playedOn(g).map(w => w === "emulator" ? "🧪" : "🎮").join(" ") : " • لم تُلعب")),
           /*#__PURE__*/React.createElement("button", {
             className: "btn ghost", disabled: mrgBusy,
-            onClick: () => setMrgAsk({ keep: g, drop: set.filter(x => x.id !== g.id)[0] })
+            onClick: () => { setMrgMsg(""); setMrgAsk({ keep: g, drop: set.filter(x => x.id !== g.id)[0] }); }
           }, "أبقِ هذه"))))),
   mrgAsk && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
     "سيُضمّ سجلّ «", mrgAsk.drop.platform, "» إلى «", mrgAsk.keep.platform, "» ثم يُحذف. ",
