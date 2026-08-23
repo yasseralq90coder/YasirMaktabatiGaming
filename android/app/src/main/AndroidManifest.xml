@@ -10,6 +10,8 @@
   <!-- لإعادة تسليح التذكير بعد إعادة تشغيل الجهاز -->
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+  <!-- largeHeap: المكتبة تحمل أغلفة base64 في IndexedDB مع 1.6MB جافاسكربت،
+       فالكومة الافتراضية تضيق ويكثر جمع المهملات فيتقطّع التمرير -->
   <application
       android:label="مكتبتي الجيمرية"
       android:icon="@mipmap/ic_launcher"
@@ -18,8 +20,6 @@
       android:supportsRtl="true"
       android:allowBackup="true"
       android:hardwareAccelerated="true"
-      <!-- المكتبة تحمل أغلفة base64 داخل IndexedDB مع 1.6MB جافاسكربت:
-           الكومة الافتراضية تضيق فيكثر جمع المهملات ويتقطّع التمرير -->
       android:largeHeap="true">
 
     <activity

@@ -37,6 +37,17 @@ jobs:
           node --check sw.js
           node tests/run.cjs
 
+      # AndroidManifest مكسور يفشل بعد ثلاث دقائق من البناء برسالة
+      # "Error parsing" لا تقول أين. xmllint يقولها في ثانية.
+      - name: فحص صيغة XML
+        run: |
+          sudo apt-get install -y libxml2-utils >/dev/null 2>&1 || true
+          fail=0
+          for f in $(find android/app/src/main -name "*.xml"); do
+            xmllint --noout "$f" || { echo "XML مكسور: $f"; fail=1; }
+          done
+          [ "$fail" = "0" ] && echo "كل ملفات XML سليمة" || exit 1
+
       - name: ترقيم الإصدار
         id: ver
         run: |
