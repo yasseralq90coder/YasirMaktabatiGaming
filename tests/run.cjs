@@ -30,6 +30,7 @@ const sess = (day, hours, src, note) => {
   if (note) o.note = note;
   return o;
 };
+const mapIds = sets => (sets||[]).map(a => a.map(g => g.id));
 let seq = 0;
 const game = o => Object.assign({
   id: "g" + (++seq), name: "لعبة", platform: "Sega Genesis", hardware: "original",
@@ -41,17 +42,26 @@ G("① نقاط الخبرة والمستوى");
 noThrow(() => C.baseXp(null), "baseXp(null) لا ينهار");
 noThrow(() => C.baseXp([{}]), "baseXp على لعبة فارغة لا ينهار");
 eq(C.baseXp([game({ type: "physical" })]), 10, "لعبة فيزيائية = 10 نقاط اقتناء");
-eq(C.baseXp([game({ type: "digital" })]), 5, "لعبة رقمية = 5 نقاط");
+/* نقاط الاقتناء تكافئ **الملكية**: ملموس 10 > شراء من المتجر 7 > ما لا تملكه 1.
+   قبلها كانت المحمّلة تعطي 5 كالمشتراة، فلم يفرّق الرقم بين ما تملكه وما لا. */
+eq(C.baseXp([game({ type: "digital" })]), 7, "شراء من المتجر = 7 نقاط");
+eq(C.baseXp([game({ type: "downloaded" })]), 1, "محمّلة (لا تملكها) = نقطة واحدة");
+eq(C.baseXp([game({ type: "subscription" })]), 1, "اشتراك (لا تملكه) = نقطة واحدة");
+ok(C.acqXp(game({ type: "physical" })) > C.acqXp(game({ type: "digital" }))
+  && C.acqXp(game({ type: "digital" })) > C.acqXp(game({ type: "downloaded" })),
+  "سُلّم الاقتناء: ملموس > متجر > غير مملوكة");
+eq(C.acqXp(game({ type: "wat" })), 1, "نوع غير معروف ⇒ نقطة واحدة لا undefined");
+eq(C.acqXp(null), 0, "acqXp(null) لا ينهار");
 eq(C.baseXp([game({ nso: true, type: "subscription" })]), 1, "لعبة NSO = نقطة واحدة");
 eq(C.baseXp([game({ shell: true, type: "physical" })]), 0, "غلاف المجموعة لا يعطي نقاط اقتناء");
-eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3)] })]), 35,
-  "3 ساعات حقيقية = 30 نقطة + 5 اقتناء");
-eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3, "backfill")] })]), 5,
+eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3)] })]), 37,
+  "3 ساعات حقيقية = 30 نقطة + 7 اقتناء");
+eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3, "backfill")] })]), 7,
   "الوقت التعويضي (backfill) لا يعطي XP");
 ok(C.levelInfo(-50).level === 1, "XP سالب ⇒ المستوى 1");
 ok(C.levelInfo(NaN).level === 1, "XP غير رقمي ⇒ المستوى 1");
 ok(C.levelInfo(0).level === 1 && C.levelInfo(C.costFor(1)).level === 2, "حدّ المستوى الأول صحيح");
-ok(C.baseXp([game({ playthroughs: [{ date: "2026-01-01", hours: 99999, n: 1 }] })]) - 5 <= 500,
+ok(C.baseXp([game({ playthroughs: [{ date: "2026-01-01", hours: 99999, n: 1 }] })]) - 7 <= 500,
   "التختيمة الواحدة لا تتجاوز سقف 500 نقطة");
 
 /* ═══════════ ② الرتب ═══════════ */
@@ -119,8 +129,11 @@ const raGame = extra => game(Object.assign({
   }
 }, extra));
 eq(C.raGamePoints(raGame({})), 40, "نقاط RA = مجموع نقاط الإنجازات المحصَّلة");
-eq(C.raGamePoints(raGame({ hardware: "original" })), 0,
-  "لعبة على جهاز أصلي لا تعطي نقاط RA — شرط المستخدم الصريح");
+/* البوّابة صارت **الربط اليدوي وحده**. كان الشرط أيضًا `hardware === "emulator"`,
+   وقد فقد معناه حين انتقل التشغيل إلى الجلسة: اللعبة الواحدة قد تُلعب بالطريقتين.
+   والشرط يفرض نفسه بالبيانات — إنجازات RA لا تُكتسب إلا بلعبٍ على محاكٍ واعٍ بها. */
+eq(C.raGamePoints(raGame({ hardware: "original" })), 40,
+  "الحقل المُعلَن لا يمنع النقاط — البوّابة صارت الربط اليدوي لا طريقة التشغيل");
 {
   const g0 = raGame({});
   delete g0.raGameId;
@@ -608,34 +621,10 @@ G("⑨ العملة والرتب والألقاب");
   ok(has([beat(6, 10)], "sprint") === false || true, "الأصناف تعمل");
 }
 
-/* ═══════════ ⑩ عالما المكتبة (النطاق والرتب) ═══════════ */
-G("⑩ عالما المكتبة");
-{
-  const orig = game({ id: "o", hardware: "original", type: "physical", hours: 5,
-    sessions: [sess("2026-08-01", 5)], playthroughs: [{ date: "2026-08-01", hours: 5, n: 1 }] });
-  const emu = game({ id: "e", hardware: "emulator", emuDevice: "pc", type: "downloaded", hours: 2,
-    sessions: [sess("2026-08-02", 2)], playthroughs: [] });
-  const both = [orig, emu];
-
-  eq(C.scopeGames(both, "all").length, 2, "نطاق «الكل» يشمل العالمين");
-  eq(C.scopeGames(both, "original").map(g => g.id), ["o"], "نطاق الأجهزة الأصلية يعزل ألعابه");
-  eq(C.scopeGames(both, "emulator").map(g => g.id), ["e"], "نطاق المحاكاة يعزل ألعابه");
-  eq(C.scopeGames(null, "original"), [], "نطاق على قائمة فارغة لا ينهار");
-  ok(C.inScope(orig, "all") && C.inScope(orig, "original") && !C.inScope(orig, "emulator"),
-    "inScope يفرّق بين العالمين");
-  ok(!C.inScope(null, "original"), "inScope على قيمة فارغة يرجع false لا ينهار");
-
-  /* الرتبتان مستقلّتان: لكل عالم سُلَّمه، ومقياسه هو نفس gameScore على ألعابه */
-  const ro = C.worldRankOf(both, "original"), re = C.worldRankOf(both, "emulator");
-  eq(ro.score, C.gameScore([orig]), "رتبة الأصلي تقيس ألعاب الأصلي وحدها");
-  eq(re.score, C.gameScore([emu]), "رتبة المحاكي تقيس ألعاب المحاكي وحدها");
-  ok(ro.name !== re.name || ro.score !== re.score, "السُلَّمان مختلفان فعلًا");
-  ok(C.ORIGINAL_RANKS[0][1] !== C.EMULATOR_RANKS[0][1], "لكل عالم أسماء رتب خاصة به");
-
-  /* المستوى الموحّد لا يتأثر بالنطاق — هوية واحدة (قرار المستخدم) */
-  eq(C.totalXp(both), C.totalXp(C.scopeGames(both, "all")), "XP الكلي لا يتغيّر بنطاق «الكل»");
-  ok(C.totalXp(both) > C.totalXp([orig]), "XP الكلي يشمل العالمين معًا");
-}
+/* ═══════════ ⑩ سُلَّم الرتب المشترك ═══════════ */
+/* سقط «عالما المكتبة» بالمرحلة ٣ (المُبدِّل والرتبتان)، وبقي rankOn لأنه
+   السُلَّم المشترك للمِران والصيد والرفّ والأركيد — كسره يكسر أربع رتب دفعةً. */
+G("⑩ سُلَّم الرتب المشترك");
 {
   /* rankOn هو السُلَّم المشترك — كسره يكسر أربع رتب دفعةً */
   const L = [[0, "أ", "1"], [10, "ب", "2"], [20, "ج", "3"]];
@@ -662,6 +651,242 @@ G("⑪ اتساق نقاط الخبرة الكلية");
   eq(Math.round(parts), Math.round(C.totalXp(gs)), "مجموع مصادر الخبرة = الإجمالي");
   ok(C.challengeXp(gs) + C.streakXp(gs) > 0, "التحديات والسلسلة تساهم فعلًا فلا يجوز إغفالهما");
 }
+
+/* ═══════════ ⑫ محورا التشغيل والملكية ═══════════ */
+G("⑫ التشغيل صفة على الجلسة، والملكية مشتقّة");
+{
+  /* المرحلة ١ من فصل الجهاز عن الملكية: `hardware` كان صفة دائمة على اللعبة
+     فمنعها من أن تُلعب على المحاكي مرّة وعلى الجهاز الأصلي مرّة. صار
+     `s.hw` هو مصدر الحقيقة، و`g.hardware` بيانات موروثة تُقرأ للترحيل. */
+
+  /* --- الملكية: دالة تامّة من type، بلا حقل مخزَّن يمكن أن ينحرف --- */
+  ok(C.isOwned(game({ type: "physical" })), "ملموس ⇒ مملوكة");
+  ok(C.isOwned(game({ type: "digital" })), "شراء من المتجر ⇒ مملوكة");
+  ok(!C.isOwned(game({ type: "downloaded" })), "محمّلة ⇒ غير مملوكة");
+  ok(!C.isOwned(game({ type: "subscription" })), "اشتراك ⇒ غير مملوكة");
+  ok(!C.isOwned(null), "isOwned(null) لا ينهار");
+  eq(C.migrateGame(game({ type: "physical" })).game.owned, undefined,
+    "لا يُخزَّن حقل owned — حقلان لسؤال واحد ينحرفان (القاعدة الذهبية ٧)");
+  /* الملكية والتشغيل محوران مستقلّان: 42 لعبة في مكتبة المستخدم على جهاز
+     أصلي بنسخة غير مملوكة. اشتقاق أحدهما من الآخر يفسد الإحصاء. */
+  ok(!C.isOwned(game({ hardware: "original", type: "downloaded" })),
+    "جهاز أصلي بنسخة محمّلة ⇒ غير مملوكة (المحوران مستقلّان)");
+
+  /* --- الترحيل يوسم كل سجلّ بطريقة تشغيله --- */
+  const mg = o => C.migrateGame(game(o)).game;
+  eq(mg({ hardware: "emulator", sessions: [sess("2026-01-01", 2)] }).sessions[0].hw, "emulator",
+    "جلسة لعبة محاكي تُوسَم emulator");
+  eq(mg({ hardware: "original", sessions: [sess("2026-01-01", 2)] }).sessions[0].hw, "original",
+    "جلسة لعبة جهاز أصلي تُوسَم original");
+  eq(mg({ sessions: [sess("2026-01-01", 2, "backfill")] }).sessions[0].hw, "original",
+    "حتى الجلسة التعويضية تُوسَم — لا صنف يتيم (خطأ ٣)");
+  eq(mg({ hardware: "emulator", playthroughs: [{ date: "2026-01-01", hours: 5, n: 1 }] }).playthroughs[0].hw,
+    "emulator", "التختيمة تُوسَم أيضًا");
+  eq(mg({ hardware: "emulator", parts: [{ name: "ج١", runs: [{ date: "2026-01-01", hours: 3 }] }] })
+    .parts[0].runs[0].hw, "emulator", "تختيمات الأجزاء تُوسَم — سجلّ التختيم الثالث");
+  eq(mg({ hardware: "emulator", goals: [{ name: "هـ", runs: [{ date: "2026-01-01", hours: 3 }] }] })
+    .goals[0].runs[0].hw, "emulator", "تختيمات الأهداف تُوسَم كذلك");
+  eq(mg({ hardware: "  ", sessions: [sess("2026-01-01", 2)] }).sessions[0].hw, "original",
+    "قيمة hardware تالفة ⇒ original لا قيمة يتيمة");
+
+  /* --- نوع الشاشة ينتقل مع التشغيل الأصلي وحده --- */
+  eq(mg({ hardware: "original", displayType: "crt", sessions: [sess("2026-01-01", 2)] }).sessions[0].disp,
+    "crt", "CRT ينتقل إلى الجلسة");
+  eq(mg({ hardware: "emulator", displayType: "crt", sessions: [sess("2026-01-01", 2)] }).sessions[0].disp,
+    undefined, "جلسة محاكي لا تحمل نوع شاشة");
+  /* بطلب المستخدم صراحةً: لا فرق بين PC وSteam Deck وAyn Thor والجوال وNSO */
+  eq(mg({ hardware: "emulator", emuDevice: "nso", sessions: [sess("2026-01-01", 2)] }).sessions[0].dev,
+    undefined, "جهاز المحاكاة لا يُنقَل إلى الجلسة");
+
+  /* --- الترحيل ثابت: إعادة تشغيله لا تغيّر شيئًا (أخطر فشل صامت) --- */
+  {
+    const once = C.migrateGamesList([game({ hardware: "emulator", displayType: "crt", hours: 2,
+      sessions: [sess("2026-01-01", 2)], playthroughs: [{ date: "2026-01-01", hours: 2, n: 1 }] })]);
+    const twice = C.migrateGamesList(once.games);
+    ok(!twice.changed, "الترحيل ثابت — لا يعيد الكتابة كل تحميل");
+    eq(JSON.stringify(once.games), JSON.stringify(twice.games), "الترحيل الثاني لا يغيّر البيانات");
+  }
+
+  /* --- إنشاء الجلسات: مصدر واحد يستحيل أن يخرج منه سجلّ بلا تشغيل --- */
+  eq(C.mkSess(null, 2, "manual", null, { hw: "emulator" })[0].hw, "emulator",
+    "mkSess يكتب طريقة التشغيل الممرَّرة");
+  eq(C.mkSess(null, 2, "manual")[0].hw, "original",
+    "mkSess بلا إعداد ⇒ original لا undefined");
+  eq(C.mkSess(null, 2, "manual", null, { hw: "emulator", disp: "crt" })[0].disp, undefined,
+    "لا نوع شاشة على جلسة محاكي ولو مُرِّر");
+  eq(C.mkSess(null, 0, "manual", null, { hw: "emulator" }).length, 0,
+    "صفر ساعات لا ينشئ جلسة (سلوك قائم لم ينكسر)");
+
+  /* --- افتراضي الجلسة القادمة = آخر ما لعبتَ به فعلًا، بالتاريخ لا بالترتيب --- */
+  eq(C.lastSetup(game({ hardware: "original" })).hw, "original",
+    "لعبة بلا جلسات ⇒ الإعداد الموروث");
+  eq(C.lastSetup(game({ hardware: "original", displayType: "crt" })).disp, "crt",
+    "الإعداد الموروث يحمل نوع الشاشة");
+  eq(C.lastSetup(game({ hardware: "original", sessions: [
+    { ...sess("2026-01-01", 1), hw: "original" },
+    { ...sess("2026-06-01", 1), hw: "emulator" }
+  ] })).hw, "emulator", "آخر جلسة تُحدّد الافتراضي ولو خالفت حقل اللعبة");
+  eq(C.lastSetup(game({ hardware: "original", sessions: [
+    { ...sess("2026-06-01", 1), hw: "emulator" },
+    { ...sess("2026-01-01", 1), hw: "original" }
+  ] })).hw, "emulator",
+    "الأحدث بالتاريخ لا بموضعه: إضافة تختيمة بتاريخ ماضٍ تُلحق جلسة أقدم في آخر المصفوفة");
+  noThrow(() => C.lastSetup(null), "lastSetup(null) لا ينهار");
+
+  /* --- الحياد التام: لا رقم معروض يتغيّر في هذه المرحلة --- */
+  {
+    const before = [game({ hardware: "emulator", type: "downloaded", hours: 5,
+      sessions: [sess("2026-01-01", 5)], playthroughs: [{ date: "2026-01-01", hours: 5, n: 1 }] })];
+    const after = C.migrateGamesList(before).games;
+    eq(C.baseXp(after), C.baseXp(before), "الترحيل لا يمسّ نقاط الخبرة");
+    eq(C.miranTotal(after), C.miranTotal(before), "الترحيل لا يمسّ نقاط المِران");
+    eq(C.realPlayHours(after[0]), C.realPlayHours(before[0]), "الترحيل لا يمسّ الساعات");
+    eq(C.gameScore(after), C.gameScore(before), "الترحيل لا يمسّ نقاط اللعب");
+  }
+}
+
+/* ═══════════ ⑬ استعلام التشغيل، و«غير مملوكة» ≠ «محاكي» ═══════════ */
+G("⑬ التشغيل يُقرأ من الجلسات، والمحوران مستقلّان");
+{
+  /* المرحلة ٥: زالت الموصِّلات الموروثة (legacyHw/legacyDisp/legacyEmuDev) بعد
+     أن صارت كل الأسئلة تُوجَّه إلى الجلسات. القارئ الوحيد الباقي للحقول القديمة
+     هو legacySetup داخل الترحيل. هذه الاختبارات تحرس الدوال التي حلّت محلّها. */
+  const sHw = (day, hours, hw, disp) => { const o = sess(day, hours); o.hw = hw; if (disp) o.disp = disp; return o; };
+
+  /* --- playedOn: كل طريقة لُعبت بها فعلًا، ولا شيء قبل أول لعب --- */
+  eq(C.playedOn(game({})), [], "لعبة بلا جلسات: لم تُلعب بأي طريقة");
+  eq(C.playedOn(game({ hardware: "emulator" })), [],
+    "الحقل المُعلَن وحده لا يعني أنك لعبتها — لا يُقرأ إطلاقًا");
+  eq(C.playedOn(game({ sessions: [sHw("2026-01-01", 2, "emulator")] })), ["emulator"], "جلسة محاكي");
+  eq(C.playedOn(game({ sessions: [sHw("2026-01-01", 2, "original")] })), ["original"], "جلسة جهاز أصلي");
+  eq(C.playedOn(game({ sessions: [sHw("2026-01-01", 2, "original"), sHw("2026-02-01", 1, "emulator")] })).sort(),
+    ["emulator", "original"], "اللعبة الواحدة قد تكون على الطريقتين — جوهر التغيير كله");
+  eq(C.playedOn(game({ playthroughs: [{ date: "2026-01-01", hours: 5, n: 1, hw: "emulator" }] })), ["emulator"],
+    "التختيمة تحتسب أيضًا ولو بلا جلسة");
+  eq(C.playedOn(game({ sessions: [{ ...sHw("2026-01-01", 2, "emulator"), src: "backfill" }] })), [],
+    "الوقت التعويضي ليس لعبًا — لا يُثبت طريقة تشغيل");
+  noThrow(() => C.playedOn(null), "playedOn(null) لا ينهار");
+
+  ok(C.playedOnHw(game({ sessions: [sHw("2026-01-01", 2, "emulator")] }), "emulator"), "playedOnHw يطابق");
+  ok(!C.playedOnHw(game({ sessions: [sHw("2026-01-01", 2, "emulator")] }), "original"), "ولا يطابق الأخرى");
+
+  /* --- hoursOn: توزيع الساعات على الطريقتين --- */
+  {
+    const g0 = game({ sessions: [sHw("2026-01-01", 3, "original"), sHw("2026-02-01", 1, "emulator")] });
+    eq(Math.round(C.hoursOn(g0, "original")), 3, "ساعات الجهاز الأصلي");
+    eq(Math.round(C.hoursOn(g0, "emulator")), 1, "ساعات المحاكي");
+    eq(Math.round(C.hoursOn(g0, "original") + C.hoursOn(g0, "emulator")),
+      Math.round(C.realPlayHours(g0)), "مجموع الطريقتين = كل ساعاتك (لا ساعة خارج الحساب)");
+  }
+
+  /* --- نوع الشاشة صفة جلسة كذلك --- */
+  ok(C.playedDisp(game({ sessions: [sHw("2026-01-01", 2, "original", "crt")] }), "crt"), "جلسة على CRT");
+  ok(!C.playedDisp(game({ displayType: "crt" }), "crt"),
+    "حقل displayType المُعلَن لا يُحتسب — العدّاد صار «لعبتها على CRT»");
+
+  /* ---------- الشرط الحاكم: المحوران مستقلّان ----------
+     لعبة محمّلة على الهارد الداخلي تعمل على الجهاز الأصلي نفسه = تجربة أصلية
+     لا محاكاة. في مكتبة المستخدم 42 لعبة كذلك، تحمل ثلث ساعاته و41 منها على
+     CRT. أي اشتقاق يربط الملكية بالتشغيل يهجّر ثلث نشاطه إلى العالم الخطأ
+     ويُسقط أوسمة CRT — بلا خطأ في الكونسول. خانة لكل حالة: */
+  const cell = (hw, type) => game({ type: type, sessions: [sHw("2026-01-01", 2, hw, hw === "original" ? "crt" : "")] });
+  ok(C.playedOnHw(cell("original", "physical"), "original") && C.isOwned(cell("original", "physical")),
+    "أصلي + مملوكة");
+  ok(C.playedOnHw(cell("original", "downloaded"), "original") && !C.isOwned(cell("original", "downloaded")),
+    "أصلي + محمّلة على الهارد ⇒ تشغيل أصلي وغير مملوكة معًا (لا محاكاة)");
+  ok(C.playedOnHw(cell("emulator", "digital"), "emulator") && C.isOwned(cell("emulator", "digital")),
+    "محاكي + مملوكة");
+  ok(C.playedOnHw(cell("emulator", "downloaded"), "emulator") && !C.isOwned(cell("emulator", "downloaded")),
+    "محاكي + غير مملوكة");
+
+  /* والحارس الذي يفشل فعلًا لو تسرّب الاشتقاق يومًا: */
+  {
+    const crtOf = gs => C.computeAchievements(gs).tracks.find(t => t.id === "crt").value;
+    eq(crtOf([cell("original", "downloaded")]), 1,
+      "لعبة محمّلة لُعبت على جهاز أصلي وشاشة CRT تبقى داخل عدّاد CRT");
+    eq(crtOf([cell("emulator", "downloaded")]), 0, "ولعبة المحاكي لا تدخله");
+  }
+
+  /* --- المقاييس تقيس اللعب لا الاقتناء --- */
+  {
+    const emuOf = gs => C.computeAchievements(gs).tracks.find(t => t.id === "emu").value;
+    eq(emuOf([game({ hardware: "emulator" })]), 0,
+      "لعبة معلَنة كمحاكي ولم تُلعب لا تُحتسب — المسار صار «ما لعبتَه» لا «ما تملكه»");
+    eq(emuOf([game({ sessions: [sHw("2026-01-01", 2, "emulator")] })]), 1, "وما لُعب فعلًا يُحتسب");
+    const has = (gs, id) => C.computeAchievements(gs).badges.some(b => b.id === id && b.done);
+    ok(has([game({ sessions: [sHw("2026-01-01", 2, "original"), sHw("2026-02-01", 1, "emulator")] })], "both_ways"),
+      "وسام «بالطريقتين» يُفتح بلعبة واحدة على الطريقتين");
+    ok(!has([game({ sessions: [sHw("2026-01-01", 2, "emulator")] })], "both_ways"),
+      "ولا يُفتح بطريقة واحدة");
+    ok(has([game({ playthroughs: [{ date: "2026-01-01", hours: 5, n: 1, hw: "emulator" }] })], "emuMaster"),
+      "«بطل المحاكاة» يقيس تختيمةً وقعت على محاكي");
+    ok(!has([game({ hardware: "emulator", status: "completed" })], "emuMaster"),
+      "لا يكفي أن تكون معلَنة كمحاكي ومكتملة بلا تختيمة موسومة");
+  }
+
+  /* --- بوّابة RA: المنصّة لا طريقة التشغيل --- */
+  ok(C.raSupportedPlatform("Sega Genesis"), "منصّة يدعمها RA");
+  ok(!C.raSupportedPlatform("Nintendo Switch"), "منصّة لا يدعمها RA");
+  ok(!C.raSupportedPlatform("لا شيء"), "منصّة مجهولة لا تنهار");
+}
+
+/* ═══════════ ⑭ دمج نسختَي لعبة واحدة ═══════════ */
+G("⑭ دمج نسختَي لعبة واحدة");
+{
+  /* النموذج القديم أجبر المستخدم على إدخال God of War مرّتين لأنه لعبها على
+     الجهاز الأصلي وعلى المحاكي، فانقسمت ساعاتها. الدمج يضمّ ما انقسم — وهو
+     **قرار المستخدم لا استنتاج التطبيق**: قد تكون النسختان إصدارين مختلفين. */
+  const sHw = (day, hours, hw) => { const o = sess(day, hours); o.hw = hw; return o; };
+  const A = game({ id: "A", name: "God of War", platform: "PlayStation 2", hours: 3,
+    sessions: [sHw("2026-02-01", 3, "emulator")], raGameId: 2782,
+    ra: { gameId: 2782, numAchievements: 2, numAwarded: 1, achievements: [{ id: 1, earned: true, points: 5 }] },
+    dateAdded: "2026-02-01", notes: "على المحاكي" });
+  const B = game({ id: "B", name: "God of war", platform: "PlayStation 2", hours: 5,
+    sessions: [sHw("2026-01-01", 5, "original")],
+    playthroughs: [{ date: "2026-01-20", hours: 5, n: 1, hw: "original" }],
+    status: "completed", dateCompleted: "2026-01-20", dateAdded: "2026-01-01", notes: "على الجهاز" });
+
+  /* --- الترشيح: اقتراح لا تنفيذ --- */
+  eq(mapIds(C.mergeCandidates([A, B])), [["A", "B"]], "اختلاف حالة الأحرف لا يمنع الاقتراح");
+  eq(C.mergeCandidates([A]).length, 0, "لعبة وحيدة ليست مرشّحًا");
+  eq(C.mergeCandidates([A, game({ id: "C", name: "لعبة أخرى" })]).length, 0, "اسمان مختلفان ليسا مرشّحًا");
+  eq(C.mergeCandidates([A, game({ id: "S", name: "God of War", shell: true })]).length, 0,
+    "غلاف المجموعة ليس نسخةً مكرَّرة");
+  eq(C.mergeCandidates([A, game({ id: "K", name: "God of War", parentId: "A" })]).length, 0,
+    "اللعبة الابنة داخل باقة ليست نسخةً مكرَّرة");
+  noThrow(() => C.mergeCandidates(null), "mergeCandidates(null) لا ينهار");
+
+  /* --- الدمج نفسه --- */
+  const M = C.mergeGames(B, A);   // نُبقي سجلّ الجهاز الأصلي ونضمّ إليه المحاكي
+  eq(M.id, "B", "الهدف يحتفظ بهويته");
+  eq(M.hours, 8, "الساعات مجموع الاثنين — وإلا ضاع نصف وقتك");
+  eq(M.sessions.length, 2, "الجلستان معًا");
+  eq(M.sessions.map(x => x.hw), ["original", "emulator"], "مرتّبة بالتاريخ ومحتفظة بطريقة كلٍّ منها");
+  eq(C.playedOn(M).sort(), ["emulator", "original"], "اللعبة المدموجة صارت على الطريقتين");
+  eq(Math.round(C.hoursOn(M, "original")), 5, "ساعات الجهاز الأصلي محفوظة");
+  eq(Math.round(C.hoursOn(M, "emulator")), 3, "وساعات المحاكي كذلك");
+  eq(M.dateAdded, "2026-01-01", "تاريخ الإضافة أقدم الاثنين");
+  eq(M.raGameId, 2782, "ربط RA ينتقل للهدف الذي لا ربط له");
+  ok((M.notes || "").includes("على المحاكي") && (M.notes || "").includes("على الجهاز"),
+    "الملاحظتان تُحفظان معًا لا تُستبدَل إحداهما");
+  eq(M.status, "completed", "التختيم في أيٍّ منهما يعني أنك ختمتها");
+
+  /* الترقيم ترتيبٌ لا معرّف: يُعاد بناؤه بعد الدمج فلا يتكرّر ولا ينقطع */
+  {
+    const X = game({ id: "X", name: "لعبة", playthroughs: [{ date: "2026-01-01", hours: 2, n: 1 }] });
+    const Y = game({ id: "Y", name: "لعبة", playthroughs: [{ date: "2026-03-01", hours: 2, n: 1 }] });
+    eq(C.mergeGames(X, Y).playthroughs.map(r => r.n), [1, 2], "التختيمات تُرقَّم من جديد بلا تكرار");
+  }
+
+  /* لا يخسر الدمج ساعةً ولا تختيمة — الحارس الحقيقي ضد الفقد الصامت */
+  eq(Math.round(C.realPlayHours(M) * 100),
+    Math.round((C.realPlayHours(A) + C.realPlayHours(B)) * 100), "لا ساعة تضيع في الدمج");
+  eq(M.playthroughs.length, (A.playthroughs || []).length + (B.playthroughs || []).length,
+    "ولا تختيمة تضيع");
+  noThrow(() => C.mergeGames(A, null), "mergeGames بمصدر فارغ لا ينهار");
+  eq(C.mergeGames(A, null).id, "A", "ويُرجع الهدف كما هو");
+}
+
 
 console.log("\n" + "═".repeat(46));
 console.log(fail === 0 ? "🎉 نجحت كل الاختبارات (" + pass + ")" : "⚠️  نجح " + pass + " — فشل " + fail);

@@ -395,6 +395,45 @@ function sanitizePlatform(g) {
    أما «لعبة تحوي لعبة» (Sonic × Shadow Generations) فهي لعبة حقيقية.     */
 const isShell = g => !!(g && g.shell);
 const realGames = list => (list || []).filter(g => !g.shell);
+/* ---------- محور الملكية ----------
+   سؤال «هل أملكها؟» جوابه دالة تامّة من `type`: ملموس أو مشتراة من المتجر
+   ⇒ مملوكة، ومحمّلة أو باشتراك ⇒ لا. لذلك لا يُخزَّن حقل ملكية منفصل — حقلان
+   يجيبان عن سؤال واحد ينحرفان حتمًا (القاعدة الذهبية ٧). الواجهة تسأل عن
+   الملكية أولًا ثم تعرض تفصيلها، والمُخزَّن يبقى `type` وحده.
+   ⚠️ محور مستقل تمامًا عن التشغيل: 42 لعبة في المكتبة على جهاز أصلي ونسخة
+   غير مملوكة، فلا يُشتقّ أحدهما من الآخر أبدًا. */
+const OWNED_TYPES = ["physical", "digital"];
+const isOwned = g => !!g && OWNED_TYPES.indexOf(g.type) >= 0;
+/* نقاط اقتناء اللعبة. **الملكية هي ما تُكافَأ**: نسخة ملموسة أعلى من شراءٍ من
+   المتجر، وما لا تملكه (محمّلة أو باشتراك) يعطي نقطة رمزية واحدة. قبلها كانت
+   المحمّلة تعطي 5 كالمشتراة تمامًا، فلم يكن الرقم يفرّق بين ما تملكه وما لا
+   تملكه أصلًا. وغلاف المجموعة منتَج لا لعبة فلا اقتناء له.
+   ⚠️ كان هذا المنطق مكرَّرًا حرفيًا في `baseXp` وفي شاشة «📈 مصادر نقاط الخبرة»
+   فأي تعديل كان يجب أن يطال الموضعين — خطأ ١٥ بعينه. صار دالة واحدة. */
+const ACQ_XP = { physical: 10, digital: 7, downloaded: 1, subscription: 1 };
+const acqXp = g => (!g || isShell(g)) ? 0 : (ACQ_XP[g.type] != null ? ACQ_XP[g.type] : 1);
+/* ⚠️ `hardware` و`emuDevice` و`displayType` **بيانات موروثة لا تُقرأ في التطبيق**.
+   كانت 18 مقارنة حرفية منتشرة عليها، فمرّت مرحلةً بثلاثة موصِّلات ثم زالت كلها
+   حين صارت كل الأسئلة تُوجَّه إلى الجلسات. القارئ الوحيد الباقي هو `legacySetup`
+   داخل الترحيل، وهو ما يوسم به الجلسات القديمة. الحقول تبقى في البيانات عمدًا:
+   حذفها من الملفات قرار منفصل لا يُتَّخذ قبل إصدار كامل بلا مفاجآت (خطآ ٣ و١٠). */
+/* ---------- استعلام التشغيل: «أين لعبتُها فعلًا؟» ----------
+   جوابه الجلسات والتختيمات لا الحقل المُعلَن. لعبة لم تُلعب بعد لا تُجيب —
+   وهذا هو الصحيح: لم يعد يُسأل عن طريقة التشغيل عند الإضافة، فلا نيّة
+   تُسجَّل قبل اللعب. واللعبة قد تكون على الطريقتين معًا، وهذا هو المقصود. */
+function playedOn(g) {
+  const out = [];
+  const add = hw => { if (isHw(hw) && out.indexOf(hw) < 0) out.push(hw); };
+  for (const sx of ((g && g.sessions) || [])) if (isSitting(sx)) add(sx.hw);
+  for (const r of ((g && g.playthroughs) || [])) if (r) add(r.hw);
+  for (const key of ["parts", "goals"])
+    for (const pt of ((g && g[key]) || [])) for (const r of ((pt && pt.runs) || [])) if (r) add(r.hw);
+  return out;
+}
+const playedOnHw = (g, hw) => playedOn(g).indexOf(hw) >= 0;
+const hoursOn = (g, hw) => ((g && g.sessions) || []).reduce((t, sx) =>
+  t + (isSitting(sx) && sx.hw === hw ? Math.max(0, Number(sx.ms) || 0) : 0), 0) / 3600000;
+const playedDisp = (g, disp) => ((g && g.sessions) || []).some(sx => isSitting(sx) && sx.disp === disp);
 function migrateGenre(v) {
   if (!v) return "";
   return String(v).split(/[،,]/).map(s => s.trim()).filter(Boolean).map(s => GENRE_MIGRATE[s] || s).join(", ");
@@ -556,7 +595,7 @@ const TRACKS = [{
   unit: "لعبة",
   start: 1,
   blurb: "لعبتها على CRT",
-  metric: g => g.filter(x => x.displayType === "crt").length
+  metric: g => g.filter(x => playedDisp(x, "crt")).length
 }, {
   id: "hours",
   icon: "⏱️",
@@ -596,7 +635,7 @@ const TRACKS = [{
   unit: "محاكاة",
   start: 3,
   blurb: "ألعاب على محاكي",
-  metric: g => g.filter(x => x.hardware === "emulator").length
+  metric: g => g.filter(x => playedOnHw(x, "emulator")).length
 }, {
   id: "modern",
   icon: "🚀",
@@ -838,14 +877,14 @@ const BADGES = [{
   title: "سيد الكاثود",
   desc: "ختمت لعبة على شاشة CRT",
   hidden: true,
-  check: g => g.some(x => x.displayType === "crt" && runsCountOf(x) > 0)
+  check: g => g.some(x => playedDisp(x, "crt") && runsCountOf(x) > 0)
 }, {
-  id: "console_hacker",
-  icon: "🏴‍☠️",
-  title: "مخترق الكونسول",
-  desc: "لعبت لعبة عبر محاكي كونسول",
+  id: "both_ways",
+  icon: "🔀",
+  title: "بالطريقتين",
+  desc: "لعبت لعبة واحدة على الجهاز الأصلي وعلى المحاكي",
   hidden: true,
-  check: g => g.some(x => x.hardware === "emulator" && x.emuDevice === "console")
+  check: g => g.some(x => playedOn(x).length === 2)
 }, {
   id: "cloud_surfer",
   icon: "☁️",
@@ -1027,7 +1066,7 @@ const BADGES = [{
   icon: "🕹️",
   title: "بطل المحاكاة",
   desc: "أنهيت لعبة على محاكي",
-  check: g => g.some(x => x.hardware === "emulator" && x.status === "completed")
+  check: g => g.some(x => (x.playthroughs || []).some(r => r && r.hw === "emulator"))
 }, {
   id: "remaster3",
   icon: "💎",
@@ -1800,7 +1839,7 @@ function baseXp(games) {
   for (const g of (games || [])) {
     // نقاط وجود اللعبة حسب النوع: محاكي/NSO = 1، رقمية = 5، ديسك = 10
     // غلاف المجموعة منتَج لا لعبة → لا نقاط اقتناء له (ألعابه الداخلية تُحتسب)
-    if (!isShell(g)) xp += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
+    xp += acqXp(g);
     /* ساعات موزونة بدورتها: العودة للعبة ختمتها تعطي أكثر — وهذا هو السبب
        الذي يجعلك تعود. ⚠️ مكرَّر في شاشة «مصادر نقاط الخبرة». */
     xp += XP_PER_HOUR * Math.max(0, cycleXpHours(g));
@@ -2104,23 +2143,6 @@ function arcadeScore(games) {
   return (games || []).filter(g => g && g.arcadeMode).reduce((n, g) => n + (g.playthroughs || []).length, 0);
 }
 const arcadeRankOf = games => rankOn(ARCADE_RANKS, arcadeScore(games));
-
-/* ---------- عالما المكتبة: الأجهزة الأصلية والمحاكاة ----------
-   عالمان مختلفان في ذهن المستخدم وفي البيانات معًا: الأصلي يُصنَّف بالعائلة
-   والجيل ونوع الشاشة (CRT/HD)، والمحاكاة بجهاز التشغيل وحالة الربط بـRA.
-   المُبدِّل يغيّر ما تعرضه الشاشات فقط — البيانات ومنطق الحساب واحد، فلا
-   تتفرّع المسارات ولا تُضاعَف الأوسمة والمسارات (القاعدة الذهبية 5). */
-const SCOPES = [["all", "الكل", "📚"], ["original", "الأجهزة الأصلية", "🎮"], ["emulator", "المحاكاة", "🧪"]];
-const scopeMeta = sc => SCOPES.find(x => x[0] === sc) || SCOPES[0];
-const inScope = (g, sc) => sc === "all" || !!(g && g.hardware === sc);
-const scopeGames = (list, sc) => sc === "all" ? (list || []) : (list || []).filter(g => inScope(g, sc));
-/* رتبة مستقلّة لكل عالم بجانب المستوى الموحّد — نفس مقياس رتبة اللعب
-   (ساعات حقيقية + 20 لكل تختيمة) مطبَّقًا على ألعاب ذلك العالم وحدها،
-   فلا يوجد مقياس ثانٍ لنفس الشيء (خطأ 14). */
-const ORIGINAL_RANKS = [[0, "هاوي الكارتريدج", "📼"], [40, "جامع الأقراص", "💿"], [120, "حارس الرفّ", "🗄️"], [280, "خبير الأجهزة", "🕹️"], [550, "أمين المتحف", "🏛️"], [950, "سيّد الكلاسيكيات", "👑"], [1600, "أسطورة الصالون", "🌟"]];
-const EMULATOR_RANKS = [[0, "مُجرِّب النواة", "🧪"], [40, "ضابط الإعدادات", "🎛️"], [120, "مهندس المحاكاة", "⚙️"], [280, "صائد الرومات", "💾"], [550, "ساحر الشيدرز", "✨"], [950, "سيّد المحاكاة", "🧙"], [1600, "أسطورة رقمية", "🌌"]];
-const worldLadder = sc => sc === "emulator" ? EMULATOR_RANKS : ORIGINAL_RANKS;
-const worldRankOf = (games, sc) => rankOn(worldLadder(sc), gameScore(scopeGames(games, sc)));
 
 /* ---------- ضغط الصور (حجم صغير جدًا) ---------- */
 const COVER_W = 300; // عرض الغلاف بالبكسل
@@ -2674,9 +2696,14 @@ function raRepeats(g) {
 const raEarnedCount = g => raAchList(g).filter(a => a.earned).length;
 const raTotalCount = g => Number((g && g.ra && g.ra.numAchievements) || 0) || raAchList(g).length;
 const raIsMastered = g => raTotalCount(g) > 0 && raEarnedCount(g) >= raTotalCount(g);
-/* لعبة تُحتسب إنجازاتها: مرتبطة يدويًا + على محاكي. شرط المستخدم الصريح:
-   اللعبة على جهاز أصلي لا تعرض إنجازات ولا تساهم فيها، ولو بقي فيها g.ra. */
-const raShows = g => !!(g && g.hardware === "emulator" && g.raGameId && g.ra);
+/* لعبة تُحتسب إنجازاتها: **مرتبطة يدويًا** لا غير. كانت البوّابة تشترط أيضًا
+   `hardware === "emulator"`، وذلك شرطٌ فقد معناه حين انتقل التشغيل إلى الجلسة:
+   اللعبة الواحدة قد تُلعب بالطريقتين. والشرط يفرض نفسه بالبيانات على أي حال —
+   إنجازات RA لا تُكتسب إلا بلعبٍ على محاكٍ واعٍ بـRA، والربط يدويّ محض. */
+const raShows = g => !!(g && g.raGameId && g.ra);
+/* هل يمكن ربط هذه اللعبة أصلًا؟ سؤالٌ عن **المنصّة** لا عن طريقة التشغيل:
+   RA يغطّي الريترو وحدها، و19 من 39 منصّة لا يدعمها. */
+const raSupportedPlatform = plat => !!RA_ALIASES[plat];
 /* نقاط RA للعبة: نقاط كل إنجاز محصَّل + نصف نقاطه عن كل إعادة كسب.
    نصف لأن التكرار إنجاز حقيقي لكنه أسهل من الأول — يكافئ بلا تضخيم.
    البوابة raShows هنا لا عند المستدعي: baseXp يمرّ على كل الألعاب، ونسيان
@@ -2740,7 +2767,6 @@ const KEY_RA_USER = "gamelib:rauser";
 const KEY_RA_KEY = "gamelib:rakey";
 const KEY_TIMER = "gamelib:timer";
 const KEY_NSOSUB = "gamelib:nsosub";
-const KEY_SCOPE = "gamelib:scope";
 const KEY_THEME = "gamelib:theme";
 const THEME_DEF = { mode: "dark", accent: "#ffc24b", live: true };
 // إضاءة نسبية (WCAG) — لاختيار حبر مقروء فوق أي لكنة يختارها المستخدم
@@ -2883,21 +2909,43 @@ function Stars({
     }
   }, "★")));
 }
-const EMU_DEVICES = {
-  pc: { label: "حاسب", icon: "💻" },
-  steamdeck: { label: "Steam Deck", icon: "🎮" },
-  aynthor: { label: "AYN Thor", icon: "📱" },
-  console: { label: "كونسول آخر", icon: "📺" },
-  nso: { label: "Nintendo Switch Online", icon: "🔴" },
-  other: { label: "جهاز آخر", icon: "🧪" }
-};
-function PlatformBadge({
-  platform,
-  hardware,
-  emuDevice
-}) {
+/* ---------- اختيار طريقة التشغيل لحظة اللعب ----------
+   السؤال يُطرح عند اللعب لا عند الإضافة: نفس اللعبة قد تُلعب على الجهاز
+   الأصلي مرّة وعلى المحاكي مرّة. الافتراضي آخر ما لعبتَ به، فلا احتكاك في
+   الحالة الشائعة. **لا فرع لجهاز المحاكاة** — بطلب المستخدم صراحةً لا فرق
+   عنده بين PC وSteam Deck وAyn Thor والجوال وخدمة NSO.
+   ⚠️ E غير معرَّف بعد في هذا الموضع من الملف — React.createElement صراحةً. */
+function PlaySetup({ platform, value, onChange }) {
+  const hw = (value && value.hw) === "emulator" ? "emulator" : "original";
+  const disp = (value && value.disp) || "";
+  const retro = hw === "original" && isRetroPlatform(platform);
+  return /*#__PURE__*/React.createElement("div", { className: "playsetup" },
+    /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "🎮 لعبتها على"),
+    /*#__PURE__*/React.createElement("div", { className: "seg" },
+      /*#__PURE__*/React.createElement("button", {
+        className: hw === "original" ? "on" : "",
+        onClick: () => onChange({ hw: "original", disp: disp })
+      }, "🎮 الجهاز الأصلي"),
+      /*#__PURE__*/React.createElement("button", {
+        className: hw === "emulator" ? "on" : "",
+        onClick: () => onChange({ hw: "emulator", disp: "" })
+      }, "🧪 محاكي")),
+    retro && /*#__PURE__*/React.createElement("div", { className: "seg" },
+      /*#__PURE__*/React.createElement("button", {
+        className: disp === "crt" ? "on" : "",
+        onClick: () => onChange({ hw: hw, disp: "crt" })
+      }, "📺 CRT"),
+      /*#__PURE__*/React.createElement("button", {
+        className: disp === "hd" ? "on" : "",
+        onClick: () => onChange({ hw: hw, disp: "hd" })
+      }, "🖥️ HD")));
+}
+/* المنصّة معلومة إحصائية ثابتة، وطريقة التشغيل واقعةٌ قد تتعدّد: لعبة لُعبت
+   على الجهاز الأصلي وعلى المحاكي تعرض الرمزين معًا — وهذا هو بيت القصيد. */
+function PlatformBadge({ game }) {
+  const platform = game && game.platform;
   const c = colorOf(platform);
-  const emu = hardware === "emulator" ? (EMU_DEVICES[emuDevice] || EMU_DEVICES.other) : null;
+  const ways = playedOn(game);
   return /*#__PURE__*/React.createElement("span", {
     style: {
       display: "inline-flex",
@@ -2912,9 +2960,10 @@ function PlatformBadge({
       border: "1px solid " + c + "55",
       whiteSpace: "nowrap"
     }
-  }, platform, emu && /*#__PURE__*/React.createElement("span", {
-    title: "محاكي — " + emu.label
-  }, " " + emu.icon));
+  }, platform, ways.map(w => /*#__PURE__*/React.createElement("span", {
+    key: w,
+    title: w === "emulator" ? "لعبتها على محاكي" : "لعبتها على الجهاز الأصلي"
+  }, " " + (w === "emulator" ? "🧪" : "🎮"))));
 }
 
 /* ===== اللون الحيّ: استخراج لون مهيمن من غلاف اللعبة ===== */
@@ -3152,7 +3201,7 @@ const GameCard = React.memo(function GameCard({
     className: "card-body"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-name"
-  }, game.name, game.displayType === "crt" && " 📺"),
+  }, game.name, playedDisp(game, "crt") && " 📺"),
   /* وسم السَّحب — حالة على البطاقة لا إشعارًا، فمكتبة كبيرة لا تُغرقك بمئات
      التنبيهات أول مرة. يتحوّل من هجر إلى مصالحة حين تعود وتختمها. */
   (() => {
@@ -3173,11 +3222,7 @@ const GameCard = React.memo(function GameCard({
     className: "card-nso-origin"
   }, "عبر Nintendo Switch Online", game.nsoSystem && NSO_SYSTEMS[game.nsoSystem] ? " • النظام الأصلي: " + NSO_SYSTEMS[game.nsoSystem].icon + " " + NSO_SYSTEMS[game.nsoSystem].label : ""), /*#__PURE__*/React.createElement("div", {
     className: "card-meta"
-  }, /*#__PURE__*/React.createElement(PlatformBadge, {
-    platform: game.platform,
-    hardware: game.hardware,
-    emuDevice: game.emuDevice
-  })), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(PlatformBadge, { game: game })), /*#__PURE__*/React.createElement("div", {
     className: "card-foot"
   }, /*#__PURE__*/React.createElement("span", {
     className: "card-type"
@@ -3201,52 +3246,6 @@ function FilterChip({
       borderColor: color ? color + "66" : "#2c2f44"
     }
   }, children);
-}
-
-/* ---------- مُبدِّل عالمَي المكتبة ----------
-   شريط ثابت أعلى المحتوى يظهر في المكتبة والإنجازات والإحصائيات (لا الإعدادات).
-   يُغيّر ما تعرضه الشاشات لا البيانات: مصدر واحد ومنطق واحد.
-   يعرض أيضًا رتبة العالم المختار، أو الرتبتين معًا في وضع «الكل». */
-function ScopeBar({ scope, onChange, worldRanks }) {
-  const cur = scope !== "all" ? worldRanks[scope] : null;
-  const count = scope !== "all" ? worldRanks.counts[scope] : null;
-  return /*#__PURE__*/React.createElement("div", { className: "scopebar" },
-    /*#__PURE__*/React.createElement("div", { className: "scope-tabs", role: "tablist" },
-      SCOPES.map(([k, label, icon]) => /*#__PURE__*/React.createElement("button", {
-        key: k,
-        role: "tab",
-        "aria-selected": scope === k,
-        className: "scope-tab" + (scope === k ? " on" : ""),
-        onClick: () => onChange(k)
-      },
-      /*#__PURE__*/React.createElement("span", { className: "sc-ic" }, icon),
-      /*#__PURE__*/React.createElement("span", { className: "sc-lb" }, label),
-      k !== "all" && /*#__PURE__*/React.createElement("span", { className: "sc-n" }, worldRanks.counts[k])))),
-    /* عالم واحد مختار: رتبته وتقدّمها */
-    cur && /*#__PURE__*/React.createElement("div", { className: "scope-rank" },
-      /*#__PURE__*/React.createElement("span", { className: "sr-ic" }, cur.icon),
-      /*#__PURE__*/React.createElement("div", { className: "sr-i" },
-        /*#__PURE__*/React.createElement("b", null, cur.name),
-        /*#__PURE__*/React.createElement("small", null,
-          count, " لعبة • ", cur.score, " نقطة لعب",
-          cur.next ? " • التالية: " + cur.next + " عند " + cur.nextAt : " • أعلى رتبة 🎉")),
-      /*#__PURE__*/React.createElement("div", { className: "sr-bar" },
-        /*#__PURE__*/React.createElement("div", { className: "sr-fill", style: { width: Math.round(cur.pct) + "%" } }))),
-    /* وضع «الكل»: الرتبتان جنبًا إلى جنب */
-    scope === "all" && (worldRanks.counts.original > 0 || worldRanks.counts.emulator > 0) &&
-      /*#__PURE__*/React.createElement("div", { className: "scope-both" },
-        ["original", "emulator"].filter(k => worldRanks.counts[k] > 0).map(k => {
-          const r = worldRanks[k];
-          return /*#__PURE__*/React.createElement("button", {
-            key: k, className: "sb-card", onClick: () => onChange(k)
-          },
-          /*#__PURE__*/React.createElement("span", { className: "sb-ic" }, r.icon),
-          /*#__PURE__*/React.createElement("div", { className: "sb-i" },
-            /*#__PURE__*/React.createElement("b", null, r.name),
-            /*#__PURE__*/React.createElement("small", null, scopeMeta(k)[2], " ", worldRanks.counts[k], " لعبة")),
-          /*#__PURE__*/React.createElement("div", { className: "sr-bar" },
-            /*#__PURE__*/React.createElement("div", { className: "sr-fill", style: { width: Math.round(r.pct) + "%" } })));
-        })));
 }
 
 /* ---------- نافذة الربط اليدوي بـRetroAchievements ----------
@@ -3654,6 +3653,11 @@ function GameDetail({
     setSBusy(false);
   };
   const [tBusy, setTBusy] = useState(false);
+  /* طريقة تشغيل الجلسة القادمة: افتراضها آخر ما لعبتَ به هذه اللعبة، ويقدر
+     المستخدم يغيّرها قبل البدء أو عند التأكيد. تُصفَّر عند تبديل اللعبة. */
+  const [setupPick, setSetupPick] = useState(null);
+  useEffect(() => { setSetupPick(null); }, [game.id]);
+  const playSetup = setupPick || lastSetup(game);
   const [pend, setPend] = useState(null);
   const [comp, setComp] = useState(null);
   const [congrats, setCongrats] = useState(null);
@@ -3696,7 +3700,7 @@ function GameDetail({
   /* الربط بـRA للإنجازات فقط: لا يجلب وقت لعب ولا يخفي العدّاد. كل الساعات
      في هذا التطبيق تُسجَّل يدويًا بالعدّاد أو بالإدخال اليدوي — بلا استثناء. */
   const raLinked = raShows(game);
-  const raCanLink = game.hardware === "emulator";
+  const raCanLink = raSupportedPlatform(game.platform);
   const fetchWorldRecord = async () => {
     if (!raUser || !raKey) { setMsg("أضف اسم مستخدم ومفتاح RetroAchievements من الإعدادات أولًا"); return; }
     setRaState("loading");
@@ -3725,7 +3729,7 @@ function GameDetail({
       setMsg("أدخل عدد ساعات اللعب أولًا قبل الاعتماد");
       return;
     }
-    const n = await onAddPlaythrough(game.id, comp, pi);
+    const n = await onAddPlaythrough(game.id, comp, pi, playSetup);
     setComp(null);
     setMsg("");
     if (n) setCongrats({
@@ -3764,12 +3768,12 @@ function GameDetail({
   };
   const confirmSession = () => {
     const add = (Number(pend.h) || 0) + (Number(pend.m) || 0) / 60;
-    if (add > 0) onAddPlayTime(game.id, add, selPart, (pend.note || "").trim());
+    if (add > 0) onAddPlayTime(game.id, add, selPart, (pend.note || "").trim(), playSetup);
     setPend(null);
   };
   const commitAsRun = async () => {
     const add = (Number(pend.h) || 0) + (Number(pend.m) || 0) / 60;
-    if (add > 0) await onAddPlayTime(game.id, add, selPart, (pend.note || "").trim());
+    if (add > 0) await onAddPlayTime(game.id, add, selPart, (pend.note || "").trim(), playSetup);
     const pi = selPart;
     if (pi < 0 && game.arcadeMode) {
       /* ألعاب الأركيد تُحتسَب تلقائيًا (كل 3 ساعات) داخل onAddPlayTime نفسها —
@@ -3777,7 +3781,7 @@ function GameDetail({
       setPend(null);
       return;
     }
-    const n = await onCompleteTimer(game.id, today, pi);
+    const n = await onCompleteTimer(game.id, today, pi, playSetup);
     setPend(null);
     if (n) setCongrats({
       n: n,
@@ -3877,7 +3881,7 @@ function GameDetail({
     style: { backgroundImage: "url(" + cover + ")" }
   }), /*#__PURE__*/React.createElement("div", {
     className: "modal-head gd-z"
-  }, /*#__PURE__*/React.createElement("h2", null, game.name, game.displayType === "crt" && " 📺"),
+  }, /*#__PURE__*/React.createElement("h2", null, game.name, playedDisp(game, "crt") && " 📺"),
     /*#__PURE__*/React.createElement("div", { className: "head-acts" },
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onEdit, title: "تعديل / حذف" }, "✏️"),
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onClose, title: "إغلاق" }, "✕"))), /*#__PURE__*/React.createElement("div", {
@@ -3988,7 +3992,8 @@ function GameDetail({
     placeholder: "📓 ملاحظة عن الجلسة (اختياري) — مثل: وصلت للزعيم الثالث",
     value: pend.note || "",
     onChange: e => setPend({ ...pend, note: e.target.value })
-  }), game.arcadeMode && /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement(PlaySetup, { platform: game.platform, value: playSetup, onChange: setSetupPick }),
+  game.arcadeMode && /*#__PURE__*/React.createElement("div", {
     className: "auto-msg idle", style: { marginBottom: 6 }
   }, "🕹️ تُحتسب التختيمات تلقائيًا كل " + ARCADE_HOURS_PER_RUN + " ساعات لعب — بس سجّل الوقت"),
   /*#__PURE__*/React.createElement("div", {
@@ -4045,7 +4050,8 @@ function GameDetail({
     disabled: tOther
   }, "▶️ بدء عدّاد اللعب"), tOther && /*#__PURE__*/React.createElement("div", {
     className: "auto-msg idle"
-  }, "عدّاد نشط للعبة: " + timer.name))),
+  }, "عدّاد نشط للعبة: " + timer.name),
+  /*#__PURE__*/React.createElement(PlaySetup, { platform: game.platform, value: playSetup, onChange: setSetupPick }))),
   /* ===== الغلاف والبيانات (Hero) ===== */
   /*#__PURE__*/React.createElement("div", {
     className: "gd-hero"
@@ -4301,11 +4307,7 @@ function GameDetail({
     disabled: !imgPaste.trim()
   }, "تعيين"))), /*#__PURE__*/React.createElement("div", {
     className: "card-meta"
-  }, /*#__PURE__*/React.createElement(PlatformBadge, {
-    platform: game.platform,
-    hardware: game.hardware,
-    emuDevice: game.emuDevice
-  }), /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement(PlatformBadge, { game: game }), /*#__PURE__*/React.createElement("span", {
     style: {
       color: STATUSES[game.status].color,
       fontWeight: 700,
@@ -4658,66 +4660,39 @@ function GameModal({
   const isNew = !initial.id;
   const [wizardStep, setWizardStep] = useState(isNew ? "platform" : "done");
   const [dbMatched, setDbMatched] = useState(false);
-  const renderPlayback = () => [
-    /*#__PURE__*/React.createElement("div", { className: "seg-label", key: "pl-l" }, "طريقة التشغيل"),
-    /*#__PURE__*/React.createElement("div", { className: "seg", key: "pl-s" },
-      /*#__PURE__*/React.createElement("button", {
-        className: g.hardware === "original" ? "on" : "",
-        onClick: () => set("hardware", "original")
-      }, "🎮 الجهاز الأصلي"),
-      /*#__PURE__*/React.createElement("button", {
-        className: g.hardware === "emulator" ? "on" : "",
-        onClick: () => set("hardware", "emulator")
-      }, "🧪 محاكي")),
-    g.hardware === "original" && isRetroPlatform(g.platform) && /*#__PURE__*/React.createElement(React.Fragment, { key: "disp" },
-      /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "نوع الشاشة"),
-      /*#__PURE__*/React.createElement("div", { className: "seg" },
+  /* ---------- الملكية: السؤال أولًا ثم تفصيله ----------
+     «هل أملكها؟» هو ما يريد المستخدم إحصاءه، و`type` تفصيلٌ تحته: المملوكة
+     نسخةٌ ملموسة أو شراءٌ من المتجر، وغير المملوكة محمّلةٌ أو باشتراك.
+     لا يُخزَّن حقل ملكية — `isOwned` دالة تامّة من `type` (القاعدة الذهبية ٧).
+     ⚠️ مستقلّ تمامًا عن التشغيل: لعبة محمّلة على الهارد وتعمل على الجهاز
+     الأصلي نفسه تجربةٌ أصلية لا محاكاة، وهي 42 لعبة في مكتبة المستخدم. */
+  const OWN_TYPES = {
+    yes: [["physical", "💿 نسخة ملموسة"], ["digital", "🛒 شراء من المتجر"]],
+    no: [["downloaded", "💾 محمّلة (SD/HDD)"], ["subscription", "🎟️ خدمة اشتراك"]]
+  };
+  const renderOwned = () => {
+    const owned = isOwned(g);
+    return [
+      /*#__PURE__*/React.createElement("div", { className: "seg-label", key: "ow-l" }, "هل تملك اللعبة؟"),
+      /*#__PURE__*/React.createElement("div", { className: "seg", key: "ow-s" },
         /*#__PURE__*/React.createElement("button", {
-          className: g.displayType === "crt" ? "on" : "",
-          onClick: () => set("displayType", "crt")
-        }, "📺 CRT TV"),
+          className: owned ? "on" : "",
+          onClick: () => { if (!owned) set("type", "physical"); }
+        }, "✅ أملكها"),
         /*#__PURE__*/React.createElement("button", {
-          className: g.displayType === "hd" ? "on" : "",
-          onClick: () => set("displayType", "hd")
-        }, "🖥️ HD"))),
-    g.hardware === "emulator" && /*#__PURE__*/React.createElement(React.Fragment, { key: "emu" },
-      /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "جهاز المحاكاة"),
+          className: owned ? "" : "on",
+          onClick: () => { if (owned) set("type", "downloaded"); }
+        }, "🚫 لا أملكها")),
+      /*#__PURE__*/React.createElement("div", { className: "seg-label", key: "ow-d" },
+        owned ? "كيف حصلت عليها" : "من أين تلعبها"),
       /*#__PURE__*/React.createElement("div", {
-        className: "seg", style: { display: "flex", flexWrap: "wrap", gap: "6px" }
-      }, Object.keys(EMU_DEVICES).map(k => /*#__PURE__*/React.createElement("button", {
-        key: k,
-        className: g.emuDevice === k ? "on" : "",
-        onClick: () => set("emuDevice", k)
-      }, EMU_DEVICES[k].icon, " ", EMU_DEVICES[k].label))),
-      g.emuDevice === "other" && /*#__PURE__*/React.createElement("label", {
-        className: "field"
-      }, /*#__PURE__*/React.createElement("span", null, "حدد الجهاز"), /*#__PURE__*/React.createElement("input", {
-        value: g.emuDeviceOther || "",
-        onChange: e => set("emuDeviceOther", e.target.value),
-        placeholder: "مثال: Retroid Pocket"
-      })))
-  ];
-  const renderOwnershipQuick = () => [
-    /*#__PURE__*/React.createElement("div", { className: "seg-label", key: "own-l" }, "نوع الملكية"),
-    /*#__PURE__*/React.createElement("div", {
-      className: "seg", key: "own-s", style: { display: "flex", flexWrap: "wrap", gap: "6px" }
-    },
-      /*#__PURE__*/React.createElement("button", {
-        className: g.type === "physical" ? "on" : "",
-        onClick: () => set("type", "physical")
-      }, "💿 ملموس أصلي"),
-      /*#__PURE__*/React.createElement("button", {
-        className: g.type === "digital" ? "on" : "",
-        onClick: () => set("type", "digital")
-      }, "☁️ رقمي مملوك"),
-      /*#__PURE__*/React.createElement("button", {
-        className: g.type === "downloaded" ? "on" : "",
-        onClick: () => set("type", "downloaded")
-      }, "💾 محملة (SD/HDD)"),
-      /*#__PURE__*/React.createElement("button", {
-        className: g.type === "subscription" ? "on" : "",
-        onClick: () => set("type", "subscription")
-      }, "🎟️ خدمة اشتراك")),
+        className: "seg", key: "ow-t", style: { display: "flex", flexWrap: "wrap", gap: "6px" }
+      }, (owned ? OWN_TYPES.yes : OWN_TYPES.no).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+        key: k, className: g.type === k ? "on" : "", onClick: () => set("type", k)
+      }, l)))
+    ];
+  };
+  const renderOwnershipQuick = () => renderOwned().concat([
     /*#__PURE__*/React.createElement("label", { className: "check", key: "arcade-cb" },
       /*#__PURE__*/React.createElement("input", {
         type: "checkbox",
@@ -4725,7 +4700,7 @@ function GameModal({
         onChange: e => set("arcadeMode", e.target.checked)
       }),
       /*#__PURE__*/React.createElement("span", null, "🕹️ ", /*#__PURE__*/React.createElement("b", null, "أسلوب أركيد"), " — تختيمها بأعلى نتيجة لا بساعات القصة"))
-  ];
+  ]);
   const pickImage = async e => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -4788,8 +4763,6 @@ function GameModal({
     setWizardStep("done");
     autoFill();
   };
-  const playbackReady = g.hardware === "emulator" ? !!g.emuDevice && (g.emuDevice !== "other" || (g.emuDeviceOther || "").trim())
-    : (isRetroPlatform(g.platform) ? !!g.displayType : true);
   if (isNew && wizardStep !== "done") {
     return /*#__PURE__*/React.createElement("div", {
       className: "modal-backdrop",
@@ -4860,17 +4833,15 @@ function GameModal({
           onClick: () => { setWizardStep("playmethod"); }
         }, "متابعة بهذا الاسم ›")),
       wizardStep === "playmethod" && /*#__PURE__*/React.createElement(React.Fragment, null,
-        /*#__PURE__*/React.createElement("div", { className: "form-sec" }, "٣. طريقة التشغيل"),
+        /*#__PURE__*/React.createElement("div", { className: "form-sec" }, "٣. الملكية"),
         /*#__PURE__*/React.createElement("button", {
           className: "btn ghost", style: { marginBottom: 8 },
           onClick: () => setWizardStep("name")
         }, "‹ رجوع للاسم"),
-        renderPlayback(),
         renderOwnershipQuick(),
         /*#__PURE__*/React.createElement("button", {
           className: "btn primary",
           style: { marginTop: 10, width: "100%" },
-          disabled: !playbackReady,
           onClick: finishWizard
         }, "متابعة — جلب الغلاف والبيانات ›")))));
   }
@@ -4950,7 +4921,7 @@ function GameModal({
   }, grouped[f].map(p => /*#__PURE__*/React.createElement("option", {
     key: p.v,
     value: p.v
-  }, p.v)))))), renderPlayback(),
+  }, p.v)))))),
   /*#__PURE__*/React.createElement("div", {
     className: "seg-label"
   }, "الحالة"),/*#__PURE__*/React.createElement("div", {
@@ -4966,22 +4937,7 @@ function GameModal({
     onClick: () => set("status", k)
   }, STATUSES[k].icon, " ", STATUSES[k].label))), /*#__PURE__*/React.createElement("div", {
     className: "seg-label"
-  }, "النوع و الملكية"), /*#__PURE__*/React.createElement("div", {
-    className: "seg",
-    style: { display: "flex", flexWrap: "wrap", gap: "6px" }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: g.type === "physical" ? "on" : "",
-    onClick: () => set("type", "physical")
-  }, "💿 ملموس أصلي"), /*#__PURE__*/React.createElement("button", {
-    className: g.type === "digital" ? "on" : "",
-    onClick: () => set("type", "digital")
-  }, "☁️ رقمي مملوك"), /*#__PURE__*/React.createElement("button", {
-    className: g.type === "downloaded" ? "on" : "",
-    onClick: () => set("type", "downloaded")
-  }, "💾 محملة (SD/HDD)"), /*#__PURE__*/React.createElement("button", {
-    className: g.type === "subscription" ? "on" : "",
-    onClick: () => set("type", "subscription")
-  }, "🎟️ خدمة اشتراك")), (g.type === "digital" || g.type === "subscription") && /*#__PURE__*/React.createElement("label", {
+  }, "الملكية"), renderOwned(), (g.type === "digital" || g.type === "subscription") && /*#__PURE__*/React.createElement("label", {
     className: "field"
   }, /*#__PURE__*/React.createElement("span", null, "المتجر الرقمي"), /*#__PURE__*/React.createElement("select", {
     value: g.source,
@@ -5887,7 +5843,6 @@ function AchievementsView({
   themeMode,
   onOpenGame,
   games,
-  scope,
   covers,
   ach,
   lvl,
@@ -5928,7 +5883,6 @@ function AchievementsView({
   const [rSort, setRSort] = useState("date");
   const [ragOpen, setRagOpen] = useState("");
   const [ragPlat, setRagPlat] = useState("all");
-  const [ragDev, setRagDev] = useState("all");
   const [ragSort, setRagSort] = useState("earned");
   const runs = useMemo(() => {
     const a = playAchievements(games);
@@ -5938,11 +5892,6 @@ function AchievementsView({
   return /*#__PURE__*/React.createElement("div", {
     className: "stats"
   },
-  /* بلا هذا التنويه يبدو الوسام المفتوح وكأنه أُقفل عند تبديل العالم —
-     الفتح يُحسب من المكتبة كاملة، والمعروض هنا تقدّمك داخل هذا العالم. */
-  scope && scope !== "all" && /*#__PURE__*/React.createElement("div", { className: "scope-note" },
-    scopeMeta(scope)[2], " تعرض تقدّمك داخل ", /*#__PURE__*/React.createElement("b", null, scopeMeta(scope)[1]),
-    " فقط. مستواك ونقاط خبرتك تبقى موحَّدة من مكتبتك كاملة، وكذلك فتح الأوسمة."),
   /*#__PURE__*/React.createElement("div", {
     className: "atabs"
   }, [["miran", "🎖️ المِران"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["overview", "📜 الأرشيف"], ["granks", "📜 رتب ألعابي"], ["ranks", "📜 الرتب القديمة"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
@@ -6539,10 +6488,8 @@ function AchievementsView({
   tab === "racheevos" && (() => {
     const raAll = games.filter(g => raShows(g) && raAchList(g).length);
     const raPlats = [...new Set(raAll.map(g => g.platform))].sort();
-    const raDevs = [...new Set(raAll.map(g => g.emuDevice || "pc"))];
     const raGamesList = raAll
       .filter(g => ragPlat === "all" || g.platform === ragPlat)
-      .filter(g => ragDev === "all" || (g.emuDevice || "pc") === ragDev)
       .map(g => {
         const list = g.ra.achievements || [];
         const earned = list.filter(a => a.earned);
@@ -6580,11 +6527,7 @@ function AchievementsView({
           raPlats.map(p2 => /*#__PURE__*/React.createElement(FilterChip, {
             key: p2, active: ragPlat === p2, onClick: () => setRagPlat(p2), color: colorOf(p2)
           }, (FAM_ICON[familyOf(p2)] || "📦") + " " + p2))),
-        raDevs.length > 1 && /*#__PURE__*/React.createElement("div", { className: "filters" },
-          /*#__PURE__*/React.createElement(FilterChip, { active: ragDev === "all", onClick: () => setRagDev("all") }, "كل أنواع المحاكاة"),
-          raDevs.map(d => /*#__PURE__*/React.createElement(FilterChip, {
-            key: d, active: ragDev === d, onClick: () => setRagDev(d)
-          }, (EMU_DEVICES[d] ? EMU_DEVICES[d].icon + " " + EMU_DEVICES[d].label : d)))),
+
         /*#__PURE__*/React.createElement("div", { className: "filters" },
           /*#__PURE__*/React.createElement("span", { className: "sort-label" }, "↕️ ترتيب:"),
           [["earned", "الأكثر إنجازًا"], ["pct", "نسبة الإكمال"], ["hours", "ساعات اللعب"], ["name", "الاسم"]].map(([k2, l2]) =>
@@ -6659,13 +6602,47 @@ function fmtBytes(n) {
   return (n / 1048576).toFixed(2) + " MB";
 }
 const E = React.createElement;
+/* ---------- محور التشغيل: صفة على الجلسة لا على اللعبة ----------
+   اللعبة الواحدة تُلعب على المحاكي مرّة وعلى الجهاز الأصلي مرّة، فطريقة التشغيل
+   واقعةٌ مؤرَّخة لا صفة دائمة. `g.hardware` و`g.displayType` يبقيان مكتوبَين
+   في هذا الإصدار (بيانات موروثة) لكن مصدر الحقيقة صار `s.hw` و`s.disp`.
+   ⚠️ جهاز المحاكاة (`emuDevice`) لا يُنقَل: بطلب المستخدم صراحةً لا فرق عنده
+   بين PC وSteam Deck وAyn Thor والجوال وخدمة NSO — كلها «محاكي». */
+const isHw = v => v === "original" || v === "emulator";
+/* الإعداد الموروث من حقول اللعبة القديمة — أساس الترحيل ومرجعُ ما لم يُلعب بعد */
+function legacySetup(g) {
+  const hw = isHw(g && g.hardware) ? g.hardware : "original";
+  return { hw, disp: hw === "original" ? ((g && g.displayType) || "") : "" };
+}
+/* إعداد الجلسة القادمة = آخر إعداد لعبتَ به فعلًا (بالتاريخ لا بترتيب الإضافة،
+   فإضافة تختيمة بتاريخ ماضٍ تُلحق جلسةً أقدم في آخر المصفوفة)، وإلا الموروث. */
+function lastSetup(g) {
+  let best = null, bestT = -Infinity;
+  for (const s of ((g && g.sessions) || [])) {
+    if (!s || !isHw(s.hw)) continue;
+    const t = Date.parse(s.at) || 0;
+    if (t >= bestT) { bestT = t; best = s; }
+  }
+  return best ? { hw: best.hw, disp: best.hw === "original" ? (best.disp || "") : "" } : legacySetup(g);
+}
+/* يضع طريقة التشغيل على جلسة أو تختيمة. المصدر الوحيد لكتابة `hw`/`disp`،
+   فلا يمكن أن يولد سجلٌّ بلا طريقة تشغيل (خطأ ٣: قيمة يتيمة بلا واجهة). */
+function stampSetup(o, setup) {
+  const st = setup || {};
+  const hw = isHw(st.hw) ? st.hw : "original";
+  const out = { ...o, hw };
+  if (hw === "original" && st.disp) out.disp = st.disp;else delete out.disp;
+  return out;
+}
 // ——— توحيد مصدر وقت اللعب ———
 // يبني جلسة مؤرَّخة من ساعات مُدخلة يدويًا (إضافة سريعة / تختيمة)
-function mkSess(dateStr, hrs, src, note) {
+// ⚠️ المسارات الأربعة التي تنشئ جلسات تمرّ من هنا وحدها — لا تنشئ جلسة يدويًا
+// في مكان خامس (خطأ ٧: دعم أُضيف لمسار ونُسي الآخر).
+function mkSess(dateStr, hrs, src, note, setup) {
   hrs = Number(hrs) || 0;
   if (hrs <= 0) return [];
   const at = (typeof dateStr === "string" && dateStr.length === 10) ? new Date(dateStr + "T12:00:00").toISOString() : new Date().toISOString();
-  const o = { at, ms: Math.round(hrs * 3600000), src: src || "manual" };
+  const o = stampSetup({ at, ms: Math.round(hrs * 3600000), src: src || "manual" }, setup);
   if (note) o.note = String(note).slice(0, 300);
   return [o];
 }
@@ -6706,6 +6683,29 @@ function migrateGame(g) {
     newG.platform = NSO_PLATFORM[newG.nsoSystem];
     newG.playedOn = newG.playedOn || "Nintendo Switch 2";
   }
+  /* ---------- نقل محور التشغيل من اللعبة إلى الجلسة ----------
+     بلا فقد: النموذج القديم لم يسمح بأكثر من طريقة تشغيل واحدة للعبة، فكل
+     ساعاتها وقعت على إعدادها الحالي بالضرورة. نوسم كل سجلّ لم يُوسَم بعد. */
+  {
+    const setup = legacySetup(newG);
+    if ((newG.sessions || []).some(s => s && !isHw(s.hw))) {
+      newG.sessions = newG.sessions.map(s => s && !isHw(s.hw) ? stampSetup(s, setup) : s);
+      changed = true;
+    }
+    if ((newG.playthroughs || []).some(p => p && !isHw(p.hw))) {
+      newG.playthroughs = newG.playthroughs.map(p => p && !isHw(p.hw) ? stampSetup(p, setup) : p);
+      changed = true;
+    }
+    /* تختيمات الأجزاء والأهداف سجلّ ثالث للتختيم — تركُها بلا وسم كان سيولّد
+       صنفًا يتيمًا يظهر حين تعتمد المقاييس على `hw` في مرحلة لاحقة. */
+    for (const key of ["parts", "goals"]) {
+      if (!(newG[key] || []).some(pt => pt && (pt.runs || []).some(r => r && !isHw(r.hw)))) continue;
+      newG[key] = newG[key].map(pt => pt && (pt.runs || []).some(r => r && !isHw(r.hw))
+        ? { ...pt, runs: pt.runs.map(r => r && !isHw(r.hw) ? stampSetup(r, setup) : r) }
+        : pt);
+      changed = true;
+    }
+  }
   /* ترميم: جلسات RA المستوردة سابقًا كانت "backfill" فاستُثنيت من كل الإحصائيات
      وXP والسلاسل. نعيد وسمها كوقت لعب حقيقي فتدخل في كل شيء بتاريخها الصحيح. */
   if ((newG.sessions || []).some(s => s && s.note === RA_IMPORT_NOTE && s.src === "backfill")) {
@@ -6741,6 +6741,61 @@ function migrateGame(g) {
      فلا تظهر لها بطاقة «اربط» ولا لوحة الإنجازات — تعطُّل صامت. */
   if (newG.raGameId && !newG.ra) { newG.raGameId = ""; changed = true; }
   return { game: newG, changed };
+}
+/* ---------- دمج نسختَي لعبة واحدة ----------
+   النموذج القديم كان يجبرك على إدخال اللعبة مرّتين لو لعبتها بطريقتين — في
+   مكتبة المستخدم God of War مُدخَلة مرّتين لهذا السبب وحده، وساعاتها منقسمة
+   بين نصفين. الآن صار للسجل الواحد أن يحمل الطريقتين، فيبقى دمج ما انقسم.
+   **الدمج قرار المستخدم لا استنتاج التطبيق**: «Sonic 2» على السويتش قد تكون
+   Sonic Origins وهي إصدار مختلف فعلًا، فنقترح ولا نفعل.
+
+   يبقى سجلّ الهدف هويةً (الاسم والمنصّة والغلاف) ويُضمّ إليه تاريخ المصدر. */
+const mergeKey = n => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function mergeCandidates(list) {
+  const by = {};
+  for (const g of (list || [])) {
+    if (!g || isShell(g) || g.parentId) continue;
+    const k = mergeKey(g.name);
+    if (!k) continue;
+    (by[k] = by[k] || []).push(g);
+  }
+  return Object.keys(by).filter(k => by[k].length > 1).map(k => by[k]);
+}
+/* يُرجع سجلًّا واحدًا يحمل تاريخ الاثنين. لا يحذف شيئًا — المستدعي يحذف المصدر. */
+function mergeGames(target, source) {
+  if (!target || !source) return target;
+  const sess = [...(target.sessions || []), ...(source.sessions || [])]
+    .sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+  /* التختيمات تُرقَّم من جديد بعد الدمج: الترقيم ترتيبٌ لا معرّف. */
+  const runs = [...(target.playthroughs || []), ...(source.playthroughs || [])]
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))
+    .map((r, i) => ({ ...r, n: i + 1 }));
+  const minDate = (a, b) => (a && b) ? (a < b ? a : b) : (a || b || "");
+  const notes = [target.notes, source.notes].filter(x => (x || "").trim()).join("\n———\n");
+  const out = {
+    ...target,
+    sessions: sess,
+    playthroughs: runs,
+    /* الساعات مجموع الاثنين لا ساعات الهدف — وإلا ضاع نصف وقتك بلا أثر. */
+    hours: r1((Number(target.hours) || 0) + (Number(source.hours) || 0)),
+    scoreAttempts: [...(target.scoreAttempts || []), ...(source.scoreAttempts || [])],
+    dateAdded: minDate(target.dateAdded, source.dateAdded),
+    status: (target.status === "completed" || source.status === "completed") ? "completed" : target.status,
+    dateCompleted: minDate(target.dateCompleted, source.dateCompleted),
+    lastPlayed: [target.lastPlayed, source.lastPlayed].filter(Boolean).sort().pop() || "",
+    notes: notes,
+    arcadeMode: !!(target.arcadeMode || source.arcadeMode),
+    /* الربط بـRA وتاريخ الإنجازات ينتقلان إن كان الهدف بلا ربط — سجلّ التكرار
+       لا يُلفَّق ولا يُدمَج: عدّادان لنفس الإنجاز لا يُجمعان بلا تشويه. */
+    raGameId: target.raGameId || source.raGameId || "",
+    ra: target.ra || source.ra || null,
+    raHist: target.raHist || source.raHist || null,
+    ttbMain: Number(target.ttbMain) > 0 ? target.ttbMain : source.ttbMain,
+    rating: Number(target.rating) > 0 ? target.rating : source.rating
+  };
+  if (!out.ra) { delete out.ra; delete out.raGameId; }
+  if (!out.raHist) delete out.raHist;
+  return out;
 }
 /* ---------- إزالة ما خلّفه استيراد RetroAchievements القديم ----------
    إصدار سابق كان يستورد ألعاب حساب RA للمكتبة ويكتب لها وقت لعب مُصطنَعًا
@@ -6825,7 +6880,7 @@ function applyArcadeAutoComplete(g) {
       if (!a.used && sc > best) { best = sc; bestIdx = idx; }
     });
     if (bestIdx >= 0) attempts = attempts.map((a, idx) => idx === bestIdx ? { ...a, used: true } : a);
-    pts.push({ date: today, score: best, hours: 0 });
+    pts.push(stampSetup({ date: today, score: best, hours: 0 }, lastSetup(g)));
   }
   pts = pts.map((p, i) => ({ ...p, n: i + 1 }));
   return { ...g, playthroughs: pts, scoreAttempts: attempts, status: "completed", dateCompleted: today, lastPlayed: nowISO() };
@@ -7016,7 +7071,7 @@ function AnnualCertModal({ games, covers, years, year, setYear, onClose }){
   );
 }
 function InsightsView({
-  scope, games, covers, ach, lvl, xp }) {
+  games, covers, ach, lvl, xp }) {
   const [period, setPeriod] = useState("month");
   const [cf, setCf] = useState("");
   const [ct, setCt] = useState("");
@@ -7215,7 +7270,7 @@ function InsightsView({
     let exist = 0, hxp = 0, cxp = 0, rxp = 0, axp = 0;
     const mmap = {};
     games.forEach(g => {
-      if (!isShell(g)) exist += g.nso ? 1 : (g.type === "physical" ? 10 : 5);
+      exist += acqXp(g);
       /* ⚠️ يطابق سطر baseXp: الساعات موزونة بمضاعف دورتها لا خامًا */
       { const mult = {}; cycleHours(g).forEach(x => { mult[x.cycle] = 1 + CYCLE_STEP * (x.cycle - 1); });
         const runsT = ((g.playthroughs || []).map(r => (r && r.date) ? (Date.parse(r.date + "T23:59:59") || 0) : 0).filter(Boolean)).sort((a, b) => a - b);
@@ -7269,6 +7324,7 @@ function BackupView({
   covers,
   ach,
   onRestore,
+  onMerge,
   onRecompress,
   rawgKey,
   onSaveRawgKey,
@@ -7284,6 +7340,10 @@ function BackupView({
   ttbBulk,
   onBulkTtb
 }) {
+  const [mrgAsk, setMrgAsk] = useState(null);
+  const [mrgBusy, setMrgBusy] = useState(false);
+  const [mrgMsg, setMrgMsg] = useState("");
+  const mergeSets = useMemo(() => mergeCandidates(games), [games]);
   const [keyDraft, setKeyDraft] = useState(rawgKey || "");
   const [keySaved, setKeySaved] = useState(false);
   useEffect(() => {
@@ -7703,7 +7763,46 @@ function BackupView({
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
-  }, "📤 إنشاء نسخة احتياطية"), /*#__PURE__*/React.createElement("p", {
+  }, "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
+    className: "bk-desc"
+  }, "النموذج القديم كان يجبرك على إدخال اللعبة مرّتين لو لعبتها على الجهاز الأصلي وعلى المحاكي. صار السجل الواحد يحمل الطريقتين، فهذه أداة لضمّ ما انقسم: تُجمَع الساعات والجلسات والتختيمات في سجلٍّ واحد. ",
+    /*#__PURE__*/React.createElement("b", null, "الاقتراح لا يعني التطابق"),
+    " — قد تكون النسختان إصدارين مختلفين فعلًا، فاختر بنفسك أيّهما يبقى."),
+  mergeSets.length === 0
+    ? /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, "لا نسخ مكرّرة في مكتبتك ✓")
+    : mergeSets.map(set => /*#__PURE__*/React.createElement("div", { className: "mrg-set", key: set[0].id },
+        /*#__PURE__*/React.createElement("div", { className: "mrg-name" }, set[0].name),
+        set.map(g => /*#__PURE__*/React.createElement("div", { className: "mrg-row", key: g.id },
+          /*#__PURE__*/React.createElement("div", { className: "mrg-i" },
+            /*#__PURE__*/React.createElement("b", null, g.platform),
+            /*#__PURE__*/React.createElement("small", null,
+              fmtHours(realPlayHours(g)), " • ",
+              (g.playthroughs || []).length, " تختيمة • ",
+              (g.sessions || []).length, " جلسة",
+              g.raGameId ? " • 🏅 مرتبطة بـRA" : "",
+              playedOn(g).length ? " • " + playedOn(g).map(w => w === "emulator" ? "🧪" : "🎮").join(" ") : " • لم تُلعب")),
+          /*#__PURE__*/React.createElement("button", {
+            className: "btn ghost", disabled: mrgBusy,
+            onClick: () => setMrgAsk({ keep: g, drop: set.filter(x => x.id !== g.id)[0] })
+          }, "أبقِ هذه"))))),
+  mrgAsk && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
+    "سيُضمّ سجلّ «", mrgAsk.drop.platform, "» إلى «", mrgAsk.keep.platform, "» ثم يُحذف. ",
+    /*#__PURE__*/React.createElement("b", null, fmtHours(realPlayHours(mrgAsk.drop))), " و", (mrgAsk.drop.sessions || []).length,
+    " جلسة تنتقل. لا رجعة إلا من نسخة احتياطية.",
+    /*#__PURE__*/React.createElement("div", { className: "bk-actions", style: { marginTop: 8 } },
+      /*#__PURE__*/React.createElement("button", {
+        className: "btn primary", disabled: mrgBusy,
+        onClick: async () => {
+          setMrgBusy(true);
+          const ok = await onMerge(mrgAsk.keep.id, mrgAsk.drop.id);
+          setMrgBusy(false); setMrgAsk(null);
+          setMrgMsg(ok ? "تم الدمج ✓" : "تعذّر الدمج");
+        }
+      }, "✅ ادمج"),
+      /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => setMrgAsk(null) }, "إلغاء"))),
+  mrgMsg && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, mrgMsg)),
+  /*#__PURE__*/React.createElement("div", { className: "bk-card" }, /*#__PURE__*/React.createElement("div", { className: "bk-title" },
+    "📤 إنشاء نسخة احتياطية"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
   }, "نسخة كاملة تشمل: ", /*#__PURE__*/React.createElement("b", null, games.length), " لعبة، ", /*#__PURE__*/React.createElement("b", null, coverCount), " غلاف، الإنجازات والبيانات. الحجم التقريبي: ", /*#__PURE__*/React.createElement("b", null, fmtBytes(json.length)), "."), /*#__PURE__*/React.createElement("div", {
     className: "bk-actions"
@@ -7836,12 +7935,13 @@ function App() {
   const [fFamily, setFFamily] = useState("all");
   const [fStatus, setFStatus] = useState("all");
   const [fType, setFType] = useState("all");
+  /* فلترا التشغيل يسألان عن **واقع اللعب** لا عن إعلانٍ على اللعبة، فلعبة
+     لم تُلعب بعد لا تطابق أيًّا منهما — ولهذا صيغ نصّهما «لعبتها على…».
+     وسقط فلتر جهاز المحاكاة: لا فرق عند المستخدم بين PC وستيم ديك وNSO. */
   const [fHardware, setFHardware] = useState("all");
   const [fCrt, setFCrt] = useState(false);
-  const [fEmuDev, setFEmuDev] = useState("all");   // تصنيف عالم المحاكاة
   /* عالم المكتبة المعروض حاليًا. يُحفظ محليًا فيبقى بين الجلسات — المستخدم
      غالبًا يعيش في عالم واحد لفترة، فإعادته لـ«الكل» كل مرة إزعاج. */
-  const [scope, setScope] = useState("all");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedGames, setSelectedGames] = useState(new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
@@ -7851,12 +7951,10 @@ function App() {
     let count = 0;
     for (const g of list) {
       if (selectedGames.has(g.id)) {
-        if (changes.hardware) g.hardware = changes.hardware;
         if (changes.type) g.type = changes.type;
         if (changes.status) g.status = changes.status;
         if (changes.rating) g.rating = changes.rating;
         if (changes.platform) g.platform = changes.platform;
-        if (changes.displayType) g.displayType = changes.displayType;
         count++;
       }
     }
@@ -7990,14 +8088,14 @@ function App() {
     await persistTimer(null);
     return ms;
   }, []);
-  const addPlayTime = useCallback(async (id, hoursToAdd, partIdx, note) => {
+  const addPlayTime = useCallback(async (id, hoursToAdd, partIdx, note, setup) => {
     const cur = gamesRef.current;
     const list = cur.map(g => {
       if (g.id !== id) return g;
       const ng = {
         ...g,
         hours: r1((Number(g.hours) || 0) + hoursToAdd),
-        sessions: [...(g.sessions || []), ...mkSess(null, hoursToAdd, "manual", note)],
+        sessions: [...(g.sessions || []), ...mkSess(null, hoursToAdd, "manual", note, setup || lastSetup(g))],
         lastPlayed: nowISO(),
         parts: partIdx >= 0 && partIdx < 1000 ? (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.parts,
         goals: partIdx >= 1000 ? (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.goals
@@ -8079,15 +8177,6 @@ function App() {
   const [swReady, setSwReady] = useState(false);
   useEffect(() => { setSwUpdateHandler(() => setSwReady(true)); }, []);
   const [nsoSub, setNsoSub] = useState({ plan: "expansion", expiry: "" });
-  /* تبديل العالم: يمسح فلاتر العالم الآخر حتى لا تبقى فلترة خفية تُخفي
-     ألعابًا بلا سبب ظاهر (فلتر CRT مثلًا لا معنى له داخل عالم المحاكاة). */
-  const changeScope = useCallback(async sc => {
-    setScope(sc);
-    setFHardware("all");
-    if (sc !== "original") setFCrt(false);
-    if (sc !== "emulator") setFEmuDev("all");
-    try { await sset(KEY_SCOPE, sc); } catch (e) {}
-  }, []);
   const saveNsoSub = useCallback(async v => {
     setNsoSub(v);
     try { await sset(KEY_NSOSUB, v); } catch {}
@@ -8209,7 +8298,7 @@ function App() {
   const raPullAll = useCallback(async () => {
     const u = raUserRef.current, k = raKeyRef.current;
     if (!u || !k) { setRaBulk({ state: "error", i: 0, total: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
-    const emus = gamesRef.current.filter(g => g && g.hardware === "emulator" && !isShell(g));
+    const emus = gamesRef.current.filter(g => g && raSupportedPlatform(g.platform) && !isShell(g));
     if (!emus.length) { setRaBulk({ state: "done", i: 0, total: 0, err: "", none: true }); return; }
     setRaBulk({ state: "running", i: 0, total: emus.length, linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0, err: "" });
     const tally = { linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0 };
@@ -8433,7 +8522,6 @@ function App() {
       setGames(list);
       gamesRef.current = list;
       try { const ns = await sget(KEY_NSOSUB); if (ns && typeof ns === "object") setNsoSub({ plan: ns.plan || "expansion", expiry: ns.expiry || "" }); } catch {}
-      try { const sc = await sget(KEY_SCOPE); if (SCOPES.some(x => x[0] === sc)) setScope(sc); } catch {}
       // أساس الإنجازات (بدون احتفال عند التحميل)
       try {
         const keys = computeAchievements(list).unlockedKeys;
@@ -8525,6 +8613,24 @@ function App() {
       });
     })();
   }, [loaded, recompressCovers]);
+  /* دمج نسختَي لعبة واحدة: يبقى الهدف ويُضمّ إليه تاريخ المصدر ثم يُحذف
+     المصدر وغلافه. لا يُستدعى إلا بضغطة صريحة — لا دمج تلقائي أبدًا. */
+  const mergeInto = useCallback(async (targetId, sourceId) => {
+    const cur = gamesRef.current;
+    const t = cur.find(g => g.id === targetId), sg = cur.find(g => g.id === sourceId);
+    if (!t || !sg || targetId === sourceId) return false;
+    const merged = mergeGames(t, sg);
+    const list = cur.filter(g => g.id !== sourceId).map(g => g.id === targetId ? merged : g)
+      .map(g => g.parentId === sourceId ? { ...g, parentId: targetId } : g);
+    setGames(list);
+    gamesRef.current = list;
+    await sset(KEY_GAMES, list);
+    try { await sdel(coverKey(sourceId)); } catch (e) {}
+    setCovers(pv => { const n = { ...pv }; delete n[sourceId]; return n; });
+    coversRef.current = { ...coversRef.current };
+    delete coversRef.current[sourceId];
+    return true;
+  }, []);
   const setParentOf = async (childId, parentId) => {
     const list = gamesRef.current.map(g => g.id === childId ? { ...g, parentId: parentId || "" } : g);
     setGames(list);
@@ -8570,7 +8676,7 @@ function App() {
   const addChildGame = parent => {
     setDetail(null);
     setEditing({
-      game: { ...blankGame(), parentId: parent.id, platform: parent.platform, hardware: parent.hardware || "original", type: parent.type, source: parent.source || "" },
+      game: { ...blankGame(), parentId: parent.id, platform: parent.platform, type: parent.type, source: parent.source || "" },
       cover: null
     });
   };
@@ -8662,7 +8768,7 @@ function App() {
     }
   };
 
-  const addPlaythrough = useCallback(async (id, entry, partIdx) => {
+  const addPlaythrough = useCallback(async (id, entry, partIdx, setup) => {
     const cur = gamesRef.current;
     const tg = cur.find(g => g.id === id);
     const newN = partIdx >= 1000 ? (((tg.goals || [])[partIdx - 1000] || {}).runs || []).length + 1 : partIdx >= 0 ? (((tg.parts || [])[partIdx] || {}).runs || []).length + 1 : ((tg && tg.playthroughs || []).length) + 1;
@@ -8670,11 +8776,11 @@ function App() {
       if (g.id !== id) return g;
       if (partIdx < 0 && g.arcadeMode) {
         const score = Math.max(0, Math.round(Number(entry.score) || 0));
-        const pts = [...(g.playthroughs || []), {
+        const pts = [...(g.playthroughs || []), stampSetup({
           date: entry.date,
           score: score,
           hours: 0
-        }].map((p, i) => ({
+        }, setup || lastSetup(g))].map((p, i) => ({
           ...p,
           n: i + 1
         }));
@@ -8690,21 +8796,21 @@ function App() {
       if (partIdx >= 1000) return {
         ...g,
         hours: r1((Number(g.hours) || 0) + entered),
-        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run")],
+        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run", null, setup || lastSetup(g))],
         lastPlayed: nowISO(),
-        goals: (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), { date: entry.date, hours: entered }] } : pt)
+        goals: (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), stampSetup({ date: entry.date, hours: entered }, setup || lastSetup(g))] } : pt)
       };
       if (partIdx >= 0) return {
         ...g,
         hours: r1((Number(g.hours) || 0) + entered),
-        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run")],
+        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run", null, setup || lastSetup(g))],
         lastPlayed: nowISO(),
-        parts: (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), { date: entry.date, hours: entered }] } : pt)
+        parts: (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), stampSetup({ date: entry.date, hours: entered }, setup || lastSetup(g))] } : pt)
       };
-      const pts = [...(g.playthroughs || []), {
+      const pts = [...(g.playthroughs || []), stampSetup({
         date: entry.date,
         hours: entered
-      }].map((p, i) => ({
+      }, setup || lastSetup(g))].map((p, i) => ({
         ...p,
         n: i + 1
       }));
@@ -8715,7 +8821,7 @@ function App() {
         dateCompleted: entry.date,
         lastPlayed: nowISO(),
         hours: r1((Number(g.hours) || 0) + entered),
-        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run")]
+        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run", null, setup || lastSetup(g))]
       };
     });
     setGames(list);
@@ -8728,7 +8834,7 @@ function App() {
     } : p);
     return newN;
   }, []);
-  const completeFromTimer = useCallback(async (id, date, partIdx) => {
+  const completeFromTimer = useCallback(async (id, date, partIdx, setup) => {
     const cur = gamesRef.current;
     const tg = cur.find(g => g.id === id);
     const sumRuns = a => (a || []).reduce((s, p) => s + (Number(p.hours) || 0), 0);
@@ -8752,17 +8858,17 @@ function App() {
       if (partIdx >= 1000) return {
         ...g,
         lastPlayed: nowISO(),
-        goals: (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, runs: [...(pt.runs || []), { date: date, hours: delta0 }] } : pt)
+        goals: (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, runs: [...(pt.runs || []), stampSetup({ date: date, hours: delta0 }, setup || lastSetup(g))] } : pt)
       };
       if (partIdx >= 0) return {
         ...g,
         lastPlayed: nowISO(),
-        parts: (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, runs: [...(pt.runs || []), { date: date, hours: delta0 }] } : pt)
+        parts: (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, runs: [...(pt.runs || []), stampSetup({ date: date, hours: delta0 }, setup || lastSetup(g))] } : pt)
       };
-      const pts = [...(g.playthroughs || []), {
+      const pts = [...(g.playthroughs || []), stampSetup({
         date: date,
         hours: delta0
-      }].map((p, i) => ({
+      }, setup || lastSetup(g))].map((p, i) => ({
         ...p,
         n: i + 1
       }));
@@ -8879,22 +8985,9 @@ function App() {
   const ach = useMemo(() => computeAchievements(realGames(games)), [games]);
   const xp = useMemo(() => totalXp(games), [games]);
   const lvl = useMemo(() => levelInfo(xp), [xp]);
-  /* ألعاب العالم المعروض. المستوى وXP يبقيان موحَّدين عمدًا — هويتك واحدة —
-     بينما الإحصائيات وتقدّم المسارات تُعرَض داخل العالم المختار. */
-  const scoped = useMemo(() => scopeGames(games, scope), [games, scope]);
-  const scopedAch = useMemo(() => scope === "all" ? ach : computeAchievements(realGames(scoped)), [ach, scoped, scope]);
-  /* رتبتان مستقلّتان: واحدة لكل عالم، تظهران معًا في «الكل» */
   /* رتبة المِران — صارت الرتبة الرئيسية في الشريط العلوي بدل المستوى.
      النظام القديم (levelInfo/xp) باقٍ في تبويب «📜 الأرشيف» ولم يُحذف. */
   const mrank = useMemo(() => miranRankOf(realGames(games)), [games]);
-  const worldRanks = useMemo(() => ({
-    original: worldRankOf(games, "original"),
-    emulator: worldRankOf(games, "emulator"),
-    counts: {
-      original: games.filter(g => inScope(g, "original")).length,
-      emulator: games.filter(g => inScope(g, "emulator")).length
-    }
-  }), [games]);
   const lastPlayedList = useMemo(() => games.filter(g => g.lastPlayed && !g.arcadeMode).sort((a, b) => String(b.lastPlayed).localeCompare(String(a.lastPlayed))).slice(0, 4), [games]);
   const bestScoreOf = g => Math.max(0, ...(g.playthroughs || []).map(p => Number(p.score) || 0), ...(g.scoreAttempts || []).map(a => Number(a.score) || 0));
   const arcadeList = useMemo(() => games.filter(g => g.arcadeMode && !g.shell).sort((a, b) => String(b.lastPlayed || b.dateAdded || "").localeCompare(String(a.lastPlayed || a.dateAdded || ""))), [games]);
@@ -9003,17 +9096,15 @@ function App() {
       if (fPlat !== "all" && g.platform !== fPlat) return false;
       if (fStatus !== "all" && g.status !== fStatus) return false;
       if (fType !== "all" && g.type !== fType) return false;
-      if (!inScope(g, scope)) return false;
-      if (fHardware !== "all" && g.hardware !== fHardware) return false;
-      if (fEmuDev !== "all" && (g.emuDevice || "pc") !== fEmuDev) return false;
-      if (fCrt && g.displayType !== "crt") return false;
+      if (fHardware !== "all" && !playedOnHw(g, fHardware)) return false;
+      if (fCrt && !playedDisp(g, "crt")) return false;
       if (q && !(g.name.toLowerCase().includes(q) || (g.developer || "").toLowerCase().includes(q) || (g.genre || "").toLowerCase().includes(q) || (g.group || "").toLowerCase().includes(q) || (kidsMap[g.id] || []).some(k => k.name.toLowerCase().includes(q)))) return false;
       return true;
     });
     const s = [...arr];
     s.sort(cmpBy(sortBy));
     return s;
-  }, [games, search, fFamily, fStatus, fType, fHardware, fEmuDev, fCrt, fPlat, sortBy, scope, kidsMap, childIds]);
+  }, [games, search, fFamily, fStatus, fType, fHardware, fCrt, fPlat, sortBy, kidsMap, childIds]);
   const showNsoCard = useMemo(() => {
     return false; /* ألعاب NSO تظهر فرادى في المكتبة الآن — البطاقة المجمّعة صارت تكرارًا */
     if (!nsoGames.length || view !== "library") return false;
@@ -9072,11 +9163,7 @@ function App() {
   }, Math.round(mrank.score / 1000) >= 1 ? Math.round(mrank.score / 1000) + "ك" : mrank.score,
     mrank.stars > 0 ? " " + "⭐".repeat(Math.min(3, mrank.stars)) : ""))), /*#__PURE__*/React.createElement("nav", {
     className: "tabs"
-  }, /*#__PURE__*/React.createElement("button", { className: view === "library" ? "on" : "", onClick: () => go("library") }, /*#__PURE__*/React.createElement("i", null, "📚"), /*#__PURE__*/React.createElement("em", null, "المكتبة")), /*#__PURE__*/React.createElement("button", { className: view === "stats" ? "on" : "", onClick: () => go("stats") }, /*#__PURE__*/React.createElement("i", null, "🏆"), /*#__PURE__*/React.createElement("em", null, "الإنجازات")), /*#__PURE__*/React.createElement("button", { className: view === "insights" ? "on" : "", onClick: () => go("insights") }, /*#__PURE__*/React.createElement("i", null, "📊"), /*#__PURE__*/React.createElement("em", null, "الإحصائيات")), /*#__PURE__*/React.createElement("button", { className: view === "backup" ? "on" : "", onClick: () => go("backup") }, /*#__PURE__*/React.createElement("i", null, "⚙️"), /*#__PURE__*/React.createElement("em", null, "الإعدادات"))), view !== "backup" && /*#__PURE__*/React.createElement(ScopeBar, {
-    scope: scope,
-    onChange: changeScope,
-    worldRanks: worldRanks
-  }), view === "library" && /*#__PURE__*/React.createElement(React.Fragment, null,
+  }, /*#__PURE__*/React.createElement("button", { className: view === "library" ? "on" : "", onClick: () => go("library") }, /*#__PURE__*/React.createElement("i", null, "📚"), /*#__PURE__*/React.createElement("em", null, "المكتبة")), /*#__PURE__*/React.createElement("button", { className: view === "stats" ? "on" : "", onClick: () => go("stats") }, /*#__PURE__*/React.createElement("i", null, "🏆"), /*#__PURE__*/React.createElement("em", null, "الإنجازات")), /*#__PURE__*/React.createElement("button", { className: view === "insights" ? "on" : "", onClick: () => go("insights") }, /*#__PURE__*/React.createElement("i", null, "📊"), /*#__PURE__*/React.createElement("em", null, "الإحصائيات")), /*#__PURE__*/React.createElement("button", { className: view === "backup" ? "on" : "", onClick: () => go("backup") }, /*#__PURE__*/React.createElement("i", null, "⚙️"), /*#__PURE__*/React.createElement("em", null, "الإعدادات"))), view === "library" && /*#__PURE__*/React.createElement(React.Fragment, null,
   lastG && covers[lastG.id] && /*#__PURE__*/React.createElement("div", { className: "bg-hero", style: { backgroundImage: "url(" + covers[lastG.id] + ")" } }),
   lastG && (() => {
     const run = timer && timer.gameId === lastG.id;
@@ -9213,10 +9300,9 @@ function App() {
      fPlat !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFPlat("all") }, fPlat, " ✕"),
      fStatus !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", style: { borderColor: STATUSES[fStatus].color }, onClick: () => setFStatus("all") }, STATUSES[fStatus].icon, " ", STATUSES[fStatus].label, " ✕"),
      fType !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFType("all") }, fType === "physical" ? "💿 أصلي" : fType === "digital" ? "☁️ رقمي" : fType === "downloaded" ? "💾 محملة" : "🎟️ اشتراك", " ✕"),
-      fHardware !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFHardware("all") }, fHardware === "original" ? "🎮 أصلي" : "🧪 محاكي", " ✕"),
-      fEmuDev !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFEmuDev("all") }, (EMU_DEVICES[fEmuDev] || EMU_DEVICES.other).icon, " ", (EMU_DEVICES[fEmuDev] || EMU_DEVICES.other).label, " ✕"),
+      fHardware !== "all" && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFHardware("all") }, fHardware === "original" ? "🎮 لعبتها على الأصلي" : "🧪 لعبتها على محاكي", " ✕"),
       fCrt && /*#__PURE__*/React.createElement("button", { className: "ft-chip", onClick: () => setFCrt(false) }, "📺 CRT", " ✕"),
-     /*#__PURE__*/React.createElement("button", { className: "ft-chip ft-clear", onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); setFHardware("all"); setFEmuDev("all"); setFCrt(false); } }, "مسح الكل")), fSheet && /*#__PURE__*/React.createElement("div", {
+     /*#__PURE__*/React.createElement("button", { className: "ft-chip ft-clear", onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); setFHardware("all"); setFCrt(false); } }, "مسح الكل")), fSheet && /*#__PURE__*/React.createElement("div", {
     className: "modal-backdrop",
     onClick: () => setFSheet(false)
   }, /*#__PURE__*/React.createElement("div", {
@@ -9272,35 +9358,25 @@ function App() {
     active: fType === k,
     onClick: () => setFType(k)
   }, l))),
-  /* فلتر التشغيل يظهر في «الكل» وحده — داخل عالمٍ محدَّد يكون قد حُسم أصلًا */
-  scope === "all" && /*#__PURE__*/React.createElement(React.Fragment, null,
-    /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "🎮 التشغيل"),
+  /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "🎮 لعبتها على"),
     /*#__PURE__*/React.createElement("div", { className: "filters" },
-      [["all", "الكل"], ["original", "🎮 أصلي"], ["emulator", "🧪 محاكي"]].map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
+      [["all", "الكل"], ["original", "🎮 الجهاز الأصلي"], ["emulator", "🧪 محاكي"]].map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
         key: k, active: fHardware === k, onClick: () => setFHardware(k)
       }, l)))),
-  /* تصنيف عالم المحاكاة: جهاز التشغيل */
-  scope !== "original" && /*#__PURE__*/React.createElement(React.Fragment, null,
-    /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "🧪 جهاز المحاكاة"),
-    /*#__PURE__*/React.createElement("div", { className: "filters" },
-      [["all", "الكل"]].concat(Object.keys(EMU_DEVICES).map(k => [k, EMU_DEVICES[k].icon + " " + EMU_DEVICES[k].label]))
-        .map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
-          key: k, active: fEmuDev === k, onClick: () => setFEmuDev(k)
-        }, l)))),
-  /* تصنيف عالم الأجهزة الأصلية: نوع الشاشة */
-  scope !== "emulator" && /*#__PURE__*/React.createElement("div", {
+  /*#__PURE__*/React.createElement("div", {
     className: "filters", style: { marginTop: 10 }
   }, /*#__PURE__*/React.createElement(FilterChip, { active: fCrt, onClick: () => setFCrt(!fCrt), color: "#f5b942" }, "📺 تم اللعب على CRT فقط"))), /*#__PURE__*/React.createElement("div", {
     className: "fsheet-ft"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
-    onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); setFHardware("all"); setFEmuDev("all"); setFCrt(false); }
+    onClick: () => { setFFamily("all"); setFPlat("all"); setFStatus("all"); setFType("all"); setFHardware("all"); setFCrt(false); }
   }, "↩️ إعادة الضبط"), /*#__PURE__*/React.createElement("button", {
     className: "btn primary",
     onClick: () => setFSheet(false)
   }, "عرض ", filtered.length + (showNsoCard ? 1 : 0), " لعبة")))), /*#__PURE__*/React.createElement("div", {
     className: "count-line"
-  }, filtered.length + (showNsoCard ? 1 : 0), " من ", scoped.length, " لعبة", scope !== "all" ? " " + scopeMeta(scope)[2] : ""), filtered.length === 0 && !showNsoCard ? /*#__PURE__*/React.createElement("div", {
+  }, filtered.length + (showNsoCard ? 1 : 0), " من ", games.length, " لعبة"), filtered.length === 0 && !showNsoCard ? /*#__PURE__*/React.createElement("div", {
     className: "empty"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9381,12 +9457,9 @@ function App() {
   })))), view === "stats" && /*#__PURE__*/React.createElement(AchievementsView, {
     themeMode: theme.mode,
     onOpenGame: id => { const g = games.find(x => x.id === id); if (g) openGame(g); },
-    /* ألعاب العالم المعروض. المستوى وXP يبقيان موحَّدين — الأوسمة تُفتح من
-       مكتبتك كاملة، وما يتغيّر هنا هو تقدّمك المعروض داخل هذا العالم. */
-    games: scoped,
-    scope: scope,
+    games: games,
     covers: covers,
-    ach: scopedAch,
+    ach: ach,
     lvl: lvl,
     xp: xp,
     levelLog: levelLog,
@@ -9396,10 +9469,9 @@ function App() {
     onEditRun: editRun,
     onDeleteRun: deleteRun
   }), view === "insights" && /*#__PURE__*/React.createElement(InsightsView, {
-    games: scoped,
-    scope: scope,
+    games: games,
     covers: covers,
-    ach: scopedAch,
+    ach: ach,
     lvl: lvl,
     xp: xp
   }), view === "backup" && /*#__PURE__*/React.createElement(BackupView, {
@@ -9409,6 +9481,7 @@ function App() {
     covers: covers,
     ach: ach,
     onRestore: handleRestore,
+    onMerge: mergeInto,
     onRecompress: recompressCovers,
     rawgKey: rawgKey,
     onSaveRawgKey: saveRawgKey,
@@ -9417,8 +9490,8 @@ function App() {
     onSaveRaCreds: saveRaCreds,
     raBulk: raBulk,
     onRaPullAll: raPullAll,
-    raLinkedCount: games.filter(g => g.raGameId && g.hardware === "emulator").length,
-    raEmuCount: games.filter(g => g.hardware === "emulator" && !isShell(g)).length,
+    raLinkedCount: games.filter(g => raShows(g)).length,
+    raEmuCount: games.filter(g => raSupportedPlatform(g.platform) && !isShell(g)).length,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
@@ -10513,39 +10586,6 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .ghost-big.back{ border-color:rgba(74,222,128,.35); background:rgba(74,222,128,.08); }
 .ghost-big .gb-ic{ font-size:19px; line-height:1; flex:none; }
 .ghost-big b{ font-size:13.5px; color:var(--txt-1); }
-/* ===== مُبدِّل عالمَي المكتبة =====
-   حاويات عمودية — لا تستخدم .track هنا (خطأ ٥: هي flex صف وتسحق الأعمدة). */
-.scopebar{ margin:10px 0 6px; display:flex; flex-direction:column; gap:8px; }
-.scope-tabs{ display:flex; gap:6px; background:var(--well); padding:4px; border-radius:999px; border:1px solid var(--hair); }
-.scope-tab{ flex:1; display:flex; align-items:center; justify-content:center; gap:5px; padding:8px 6px; border:0; border-radius:999px; background:transparent; color:var(--txt-3); font-size:12px; font-weight:700; cursor:pointer; transition:background .18s var(--ease), color .18s var(--ease); }
-.scope-tab:hover:not(.on){ color:var(--txt-1); background:var(--e1); }
-.scope-tab.on{ background:var(--e2); color:var(--txt-1); box-shadow:0 1px 6px rgba(0,0,0,.18); }
-.scope-tab .sc-ic{ font-size:14px; line-height:1; }
-.scope-tab .sc-n{ font-family:var(--num); font-size:10px; font-weight:800; padding:1px 6px; border-radius:999px; background:var(--well); color:var(--txt-4); }
-.scope-tab.on .sc-n{ background:rgba(245,185,66,.16); color:#f5b942; }
-/* رتبة العالم المختار */
-.scope-rank{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); }
-.scope-rank .sr-ic{ font-size:22px; line-height:1; flex:none; }
-.scope-rank .sr-i{ flex:1; min-width:140px; display:flex; flex-direction:column; gap:2px; }
-.scope-rank .sr-i b{ font-size:13px; }
-.scope-rank .sr-i small{ font-size:10.5px; color:var(--txt-4); }
-.sr-bar{ flex-basis:100%; height:5px; border-radius:999px; background:var(--well); overflow:hidden; }
-.sr-fill{ height:100%; background:linear-gradient(90deg,#f5b942,#ffd479); transition:width .5s var(--ease); }
-/* وضع «الكل»: الرتبتان معًا */
-.scope-both{ display:flex; gap:8px; flex-wrap:wrap; }
-.sb-card{ flex:1 1 160px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:9px 11px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); color:var(--txt-1); text-align:start; cursor:pointer; transition:border-color .15s var(--ease), background .15s var(--ease); }
-.sb-card:hover{ border-color:rgba(245,185,66,.45); background:rgba(245,185,66,.06); }
-.sb-card .sb-ic{ font-size:19px; line-height:1; flex:none; }
-.sb-card .sb-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
-.sb-card .sb-i b{ font-size:12px; }
-.sb-card .sb-i small{ font-size:10px; color:var(--txt-4); }
-/* تنويه نطاق الإنجازات */
-.scope-note{ margin:10px 0 0; padding:8px 11px; border-radius:var(--r2); font-size:11px; line-height:1.55; color:var(--txt-3); background:rgba(167,139,250,.09); border:1px solid rgba(167,139,250,.28); }
-.scope-note b{ color:#a78bfa; }
-@media (max-width:380px){
-  .scope-tab .sc-lb{ display:none; }
-  .scope-tab.on .sc-lb{ display:inline; }
-}
 /* سطر إجمالي مصادر الخبرة — يجب أن يطابق الإجمالي المعروض تحت المستوى */
 .sw-nag{ border-color:rgba(74,222,128,.45); }
 .sw-nag .tnag-t:first-child{ color:#4ade80; }
@@ -10690,6 +10730,16 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 /* ---------- الإعدادات: صفوف نظيفة ---------- */
 .backup{ padding-top:8px; }
 .bk-card + .bk-card{ margin-top:4px; }
+/* ===== دمج نسختَي لعبة واحدة (الإعدادات) =====
+   حاويات عمودية — لا تستخدم .track هنا (خطأ ٥: هي flex صف وتسحق الأعمدة). */
+.mrg-set{ margin-top:10px; padding:10px 12px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); }
+.mrg-name{ font-size:13px; font-weight:800; color:var(--txt-1); margin-bottom:6px; }
+.mrg-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px 0; border-top:1px solid var(--hair); }
+.mrg-row:first-of-type{ border-top:0; }
+.mrg-i{ flex:1; min-width:150px; display:flex; flex-direction:column; gap:2px; }
+.mrg-i b{ font-size:12px; color:var(--txt-1); }
+.mrg-i small{ font-size:10.5px; color:var(--txt-4); }
+.mrg-row .btn{ flex:none; padding:5px 12px; font-size:11.5px; }
 .bk-actions .btn, .bk-paste .btn{ flex:1; min-width:0; }
 .bk-text{ font-size:10px; min-height:70px; }
 .bk-steps{ font-size:12px; }
