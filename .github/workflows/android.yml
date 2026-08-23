@@ -42,7 +42,7 @@ jobs:
           echo "code=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
           echo "name=1.$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '17' }
 
       - uses: android-actions/setup-android@v3
