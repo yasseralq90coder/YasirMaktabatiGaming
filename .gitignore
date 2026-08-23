@@ -14,3 +14,8 @@ android/app/build/
 android/local.properties
 android/gradlew
 android/gradlew.bat
+
+# مفتاح توقيع أندرويد — ضياعه يعني نهاية التحديثات، ورفعه كارثة
+*.jks
+*.keystore
+keystore-info.txt

@@ -6,50 +6,92 @@ on:
     paths: ['index.html', 'games_db.js', 'icon.svg', 'manifest.json', 'android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
+permissions:
+  contents: write          # لإنشاء الإصدار ورفع الـAPK إليه
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # يُقيَّم مرّة على مستوى المهمّة: سياق secrets غير متاح في if الخطوة
+      HAS_KEY: ${{ secrets.KEYSTORE_B64 != '' }}
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }     # عدّ الكوميتات يحتاج التاريخ كاملًا
 
-      # مصدر واحد: تُنسخ أصول الويب كما هي إلى مرحلة البناء.
-      # لا نسخة ثانية من index.html في المستودع — النسخ يقع وقت البناء فقط.
+      # مصدر واحد: تُنسخ أصول الويب كما هي وقت البناء.
+      # لا نسخة ثانية من index.html في المستودع.
       - name: تجهيز أصول الويب
         run: |
           mkdir -p assets-build
           cp index.html games_db.js icon.svg manifest.json assets-build/
-          echo "── الأصول المنسوخة ──"; ls -lh assets-build
+          ls -lh assets-build
 
-      # فحص الصيغة قبل البناء: APK بجافاسكربت مكسور يُثبَّت ولا يعمل
-      - name: فحص صيغة تطبيق الويب
+      # APK بجافاسكربت مكسور يُثبَّت ولا يعمل — الفحص قبل البناء لا بعده
+      - name: فحص صيغة تطبيق الويب والاختبارات
         run: |
           awk '/^<script>$/{f=1;next}/<\/script>/{f=0}f' index.html > /tmp/app.js
           node --check /tmp/app.js
           node --check sw.js
           node tests/run.cjs
 
+      - name: ترقيم الإصدار
+        id: ver
+        run: |
+          # versionCode = عدد الكوميتات: يتزايد حتمًا ولا يتكرّر ولا يتراجع
+          echo "code=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+          echo "name=1.$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+
       - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+        with: { distribution: temurin, java-version: '17' }
 
       - uses: android-actions/setup-android@v3
 
+      # ⚠️ بلا هذا السرّ يُوقَّع الـAPK بمفتاح تصحيح عشوائي لكل بناء،
+      # فيرفض أندرويد تحديثه ويُجبر المستخدم على الحذف وفقدان بياناته.
+      - name: فكّ مفتاح التوقيع
+        if: env.HAS_KEY == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
       - name: بناء APK
         working-directory: android
+        env:
+          VERSION_CODE: ${{ steps.ver.outputs.code }}
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
+          KEYSTORE_PATH: ${{ env.HAS_KEY == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: maktabati
         run: |
           gradle wrapper --gradle-version 8.7 --no-daemon
           ./gradlew assembleRelease --no-daemon --stacktrace
 
-      - name: إعادة تسمية بالإصدار
+      - name: تأكيد التوقيع
         run: |
-          mkdir -p out
-          cp android/app/build/outputs/apk/release/*.apk \
-             "out/maktabati-${GITHUB_SHA::7}.apk"
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          mkdir -p out && cp "$APK" "out/maktabati-v${{ steps.ver.outputs.name }}.apk"
+          # اطبع بصمة الموقِّع: يجب أن تكون هي نفسها في كل بناء، وإلا فلا تحديث
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$APK" \
+            | grep -i 'SHA-256' | head -1 || echo "⚠️ تعذّر قراءة الشهادة"
           ls -lh out
 
       - uses: actions/upload-artifact@v4
+        with: { name: apk, path: out/*.apk, retention-days: 90 }
+
+      - name: تحذير — بناء بلا مفتاح ثابت
+        if: env.HAS_KEY != 'true'
+        run: |
+          echo "::warning::لا يوجد سرّ KEYSTORE_B64 — وُقّع الـAPK بمفتاح تصحيح عشوائي."
+          echo "::warning::هذا الناتج للفحص فقط: تثبيته يمنع أي تحديث لاحق ويفرض الحذف."
+
+      # إصدار دائم: الأثر يُحذف بعد 90 يومًا، والإصدار يبقى برابط ثابت.
+      # لا يُنشر إلا بمفتاح ثابت — وإلا أغرى بتثبيت نسخة لا تُحدَّث.
+      - name: نشر الإصدار
+        if: env.HAS_KEY == 'true'
+        uses: softprops/action-gh-release@v2
         with:
-          name: apk
-          path: out/*.apk
-          retention-days: 90
+          tag_name: v${{ steps.ver.outputs.name }}
+          name: مكتبتي الجيمرية v${{ steps.ver.outputs.name }}
+          files: out/*.apk
+          generate_release_notes: true

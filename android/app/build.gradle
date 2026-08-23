@@ -11,18 +11,37 @@ android {
     applicationId "com.yasir.maktabati"
     minSdk 26            // أندرويد 8 — أدنى إصدار فيه قنوات الإشعارات
     targetSdk 35
-    versionCode 1
-    versionName "1.0"
+    /* ⚠️ يتزايد مع كل بناء. رقم ثابت يعني أن أندرويد لا يرى نسخة أحدث
+       فيرفض التحديث — ولا رسالة خطأ مفهومة، فقط «لم يُثبَّت التطبيق». */
+    versionCode (System.getenv("VERSION_CODE") ?: "1").toInteger()
+    versionName (System.getenv("VERSION_NAME") ?: "1.0")
   }
 
   // BuildConfig.DEBUG يحتاج تفعيلًا صريحًا منذ AGP 8
   buildFeatures { buildConfig true }
 
+  /* ⚠️ **مفتاح ثابت أو لا تحديث أبدًا.** مُشغّل GitHub مؤقّت، فـGradle يولّد
+     مفتاح تصحيح جديدًا عشوائيًا في كل بناء. وأندرويد يرفض تحديثًا بمفتاح
+     مختلف عن المثبَّت — فيُجبر المستخدم على الحذف، وتضيع بياناته.
+     المفتاح يأتي من أسرار المستودع؛ وبدونها يسقط للتصحيح ليبقى البناء
+     المحلي ممكنًا، لكن **ناتجه لا يصلح للتحديث**. */
+  signingConfigs {
+    release {
+      def ksPath = System.getenv("KEYSTORE_PATH")
+      if (ksPath && file(ksPath).exists()) {
+        storeFile file(ksPath)
+        storePassword System.getenv("KEYSTORE_PASSWORD")
+        keyAlias System.getenv("KEY_ALIAS") ?: "maktabati"
+        keyPassword System.getenv("KEY_PASSWORD") ?: System.getenv("KEYSTORE_PASSWORD")
+      }
+    }
+  }
+
   buildTypes {
     release {
       // بلا تصغير: الأصول HTML/JS لا يمسّها R8، والكود الأصلي بضع مئات الأسطر
       minifyEnabled false
-      signingConfig signingConfigs.debug   // يُستبدل في CI بمفتاح حقيقي إن وُجد
+      signingConfig (System.getenv("KEYSTORE_PATH") ? signingConfigs.release : signingConfigs.debug)
     }
   }
   compileOptions {
