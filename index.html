@@ -3040,65 +3040,6 @@ function swWake() {
   } catch (e) {}
 }
 
-/* ---------- تذكير العدّاد عبر Web Push ----------
-   الطريق الوحيد المضمون لإشعار والتطبيق مغلق كليًا. `showTrigger` (جدولة
-   إشعار محلي لوقت مستقبلي) لم تُشحن في أي متصفح، وسلسلة `setTimeout` داخل
-   الـSW تموت حين يُنهي النظام العامل الخامل — ولهذا يُنسى العدّاد شغّالًا.
-
-   ⚠️ **لا تُرسل بيانات لعب إلى الخادم.** المرسَل: عنوان اشتراك الدفع ووقت
-   الاستحقاق. والدفعة تصل بلا حمولة، و`sw.js` يركّب نصّ الإشعار من IndexedDB
-   محليًا. عطّل الخادم أو احذفه ولن تخسر إلا التنبيه.
-
-   ⚠️ اختياري بالكامل: بلا عنوان خادم محفوظ لا يُطلب إذن ولا يُرسل شيء. */
-const VAPID_PUBLIC = "BDRTsHUoZOVC27WwNMDwLF4NJv93yIIozjW0aruTgFu79A7YARQFnMldBTWAbGw63lcF8mzxAnJG6STMj-74ZpM";
-const KEY_PUSHURL = "gamelib:pushurl";
-let pushUrlCache = null;
-const pushBase = async () => {
-  if (pushUrlCache !== null) return pushUrlCache;
-  try { pushUrlCache = (await sget(KEY_PUSHURL)) || ""; } catch (e) { pushUrlCache = ""; }
-  return pushUrlCache;
-};
-const setPushBase = async u => { pushUrlCache = String(u || "").replace(/[/]+$/, ""); await sset(KEY_PUSHURL, pushUrlCache); };
-const urlB64ToU8 = b64 => {
-  const pad = "=".repeat((4 - b64.length % 4) % 4);
-  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
-  return Uint8Array.from(raw, c => c.charCodeAt(0));
-};
-/* يرجع الاشتراك الحالي أو ينشئه. يتطلّب إذن الإشعارات — ولا يطلبه إلا بنداء صريح. */
-async function pushSubscribe() {
-  const reg = await navigator.serviceWorker.ready;
-  let sub = await reg.pushManager.getSubscription();
-  if (sub) return sub;
-  if (Notification.permission !== "granted") {
-    const r = await Notification.requestPermission();
-    if (r !== "granted") throw new Error("denied");
-  }
-  return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(VAPID_PUBLIC) });
-}
-async function pushSchedule(timer) {
-  const base = await pushBase();
-  if (!base || !timer || !timer.running || !timer.startedAt) return;
-  const reg = await navigator.serviceWorker.getRegistration();
-  const sub = reg && await reg.pushManager.getSubscription();
-  if (!sub) return;                                   // لم يُفعّل — لا نُزعج بطلب إذن
-  const el = (timer.accMs || 0) + (Date.now() - timer.startedAt);
-  await fetch(base + "/schedule", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ endpoint: sub.endpoint, dueAt: Date.now() + Math.max(60e3, 5 * 60e3 - (el % (5 * 60e3))), every: 5 * 60e3 })
-  }).catch(() => {});
-}
-async function pushCancel() {
-  const base = await pushBase();
-  if (!base) return;
-  const reg = await navigator.serviceWorker.getRegistration();
-  const sub = reg && await reg.pushManager.getSubscription();
-  if (!sub) return;
-  await fetch(base + "/cancel", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ endpoint: sub.endpoint })
-  }).catch(() => {});
-}
-
 function swTimerSync(timer) {
   try {
     if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
@@ -3106,13 +3047,6 @@ function swTimerSync(timer) {
       navigator.serviceWorker.controller.postMessage({ type: "timer-start", startedAt: timer.startedAt, accMs: timer.accMs || 0, name: timer.name });
     else
       navigator.serviceWorker.controller.postMessage({ type: "timer-stop" });
-  } catch (e) {}
-  /* الجدولة على الخادم تتبع نفس نقطة الاختناق: كل مسار يغيّر العدّاد يمرّ
-     بـswTimerSync، فلا يمكن أن يبدأ عدّاد بلا تذكير ولا أن يتوقّف بلا إلغاء
-     (الأثر يتبع الحالة — خطأ ١٣). */
-  try {
-    if (timer && timer.running && timer.startedAt) pushSchedule(timer);
-    else pushCancel();
   } catch (e) {}
 }
 
@@ -7204,18 +7138,6 @@ function BackupView({
   ttbBulk,
   onBulkTtb
 }) {
-  const [pushUrl, setPushUrl] = useState("");
-  const [pushState, setPushState] = useState("idle");   // idle|working|on|error
-  const [pushMsg, setPushMsg] = useState("");
-  useEffect(() => { (async () => {
-    try { setPushUrl((await sget(KEY_PUSHURL)) || ""); } catch (e) {}
-    try {
-      const reg = await navigator.serviceWorker.getRegistration();
-      const sub = reg && await reg.pushManager.getSubscription();
-      if (sub) setPushState("on");
-    } catch (e) {}
-  })(); }, []);
-  const mrgAskInit = null;
   const [mrgAsk, setMrgAsk] = useState(null);
   const [mrgBusy, setMrgBusy] = useState(false);
   const [mrgMsg, setMrgMsg] = useState("");
@@ -7642,49 +7564,7 @@ function BackupView({
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
-  }, "🔔 تنبيه العدّاد والتطبيق مغلق"), /*#__PURE__*/React.createElement("p", {
-    className: "bk-desc"
-  }, "تنسى العدّاد شغّالًا فتُسجَّل ساعات لم تلعبها. لا يمكن لأي تطبيق ويب أن يوقظ نفسه وهو مغلق — الطريق الوحيد دفعة Web Push من خادم. ",
-    /*#__PURE__*/React.createElement("b", null, "بيانات ألعابك لا تغادر جهازك"),
-    " — المُرسَل عنوان اشتراك الدفع ووقت التذكير فقط، ونصّ الإشعار يُركَّب على جهازك."),
-  /*#__PURE__*/React.createElement("label", { className: "field" },
-    /*#__PURE__*/React.createElement("span", null, "عنوان الخادم (Cloudflare Worker)"),
-    /*#__PURE__*/React.createElement("input", {
-      value: pushUrl, placeholder: "https://gamelib-timer-push.<اسمك>.workers.dev",
-      onChange: e => setPushUrl(e.target.value)
-    })),
-  /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
-    /*#__PURE__*/React.createElement("button", {
-      className: "btn primary", disabled: pushState === "working" || !pushUrl.trim(),
-      onClick: async () => {
-        setPushState("working"); setPushMsg("");
-        try {
-          await setPushBase(pushUrl.trim());
-          const r = await fetch(pushUrl.trim().replace(/[/]+$/, "") + "/health");
-          if (!r.ok) throw new Error("خادم لا يستجيب");
-          await pushSubscribe();
-          setPushState("on"); setPushMsg("مُفعَّل ✓ — جرّب: شغّل العدّاد وأغلق التطبيق تمامًا، يصلك تنبيه خلال 5 دقائق.");
-        } catch (e) {
-          setPushState("error");
-          setPushMsg(e && e.message === "denied" ? "رفضتَ إذن الإشعارات — فعّله من إعدادات المتصفح لهذا الموقع." : "تعذّر التفعيل: " + (e && e.message || "خطأ"));
-        }
-      }
-    }, pushState === "on" ? "✅ مُفعَّل — أعد التفعيل" : "🔔 فعّل التنبيه"),
-    pushState === "on" && /*#__PURE__*/React.createElement("button", {
-      className: "btn ghost",
-      onClick: async () => {
-        try {
-          await pushCancel();
-          const reg = await navigator.serviceWorker.getRegistration();
-          const sub = reg && await reg.pushManager.getSubscription();
-          if (sub) await sub.unsubscribe();
-          setPushState("idle"); setPushMsg("أُوقف التنبيه، وحُذف اشتراكك من الخادم.");
-        } catch (e) { setPushMsg("تعذّر الإيقاف"); }
-      }
-    }, "🚫 أوقف")),
-  pushMsg && /*#__PURE__*/React.createElement("div", { className: "auto-msg " + (pushState === "error" ? "error" : "done") }, pushMsg)),
-  /*#__PURE__*/React.createElement("div", { className: "bk-card" }, /*#__PURE__*/React.createElement("div", { className: "bk-title" },
-    "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
+  }, "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
   }, "النموذج القديم كان يجبرك على إدخال اللعبة مرّتين لو لعبتها على الجهاز الأصلي وعلى المحاكي. صار السجل الواحد يحمل الطريقتين، فهذه أداة لضمّ ما انقسم: تُجمَع الساعات والجلسات والتختيمات في سجلٍّ واحد. ",
     /*#__PURE__*/React.createElement("b", null, "نفس المنصّة فقط"),
