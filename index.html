@@ -395,6 +395,15 @@ function sanitizePlatform(g) {
    أما «لعبة تحوي لعبة» (Sonic × Shadow Generations) فهي لعبة حقيقية.     */
 const isShell = g => !!(g && g.shell);
 const realGames = list => (list || []).filter(g => !g.shell);
+/* ---------- محور الملكية ----------
+   سؤال «هل أملكها؟» جوابه دالة تامّة من `type`: ملموس أو مشتراة من المتجر
+   ⇒ مملوكة، ومحمّلة أو باشتراك ⇒ لا. لذلك لا يُخزَّن حقل ملكية منفصل — حقلان
+   يجيبان عن سؤال واحد ينحرفان حتمًا (القاعدة الذهبية ٧). الواجهة تسأل عن
+   الملكية أولًا ثم تعرض تفصيلها، والمُخزَّن يبقى `type` وحده.
+   ⚠️ محور مستقل تمامًا عن التشغيل: 42 لعبة في المكتبة على جهاز أصلي ونسخة
+   غير مملوكة، فلا يُشتقّ أحدهما من الآخر أبدًا. */
+const OWNED_TYPES = ["physical", "digital"];
+const isOwned = g => !!g && OWNED_TYPES.indexOf(g.type) >= 0;
 function migrateGenre(v) {
   if (!v) return "";
   return String(v).split(/[،,]/).map(s => s.trim()).filter(Boolean).map(s => GENRE_MIGRATE[s] || s).join(", ");
@@ -6659,13 +6668,47 @@ function fmtBytes(n) {
   return (n / 1048576).toFixed(2) + " MB";
 }
 const E = React.createElement;
+/* ---------- محور التشغيل: صفة على الجلسة لا على اللعبة ----------
+   اللعبة الواحدة تُلعب على المحاكي مرّة وعلى الجهاز الأصلي مرّة، فطريقة التشغيل
+   واقعةٌ مؤرَّخة لا صفة دائمة. `g.hardware` و`g.displayType` يبقيان مكتوبَين
+   في هذا الإصدار (بيانات موروثة) لكن مصدر الحقيقة صار `s.hw` و`s.disp`.
+   ⚠️ جهاز المحاكاة (`emuDevice`) لا يُنقَل: بطلب المستخدم صراحةً لا فرق عنده
+   بين PC وSteam Deck وAyn Thor والجوال وخدمة NSO — كلها «محاكي». */
+const isHw = v => v === "original" || v === "emulator";
+/* الإعداد الموروث من حقول اللعبة القديمة — أساس الترحيل ومرجعُ ما لم يُلعب بعد */
+function legacySetup(g) {
+  const hw = isHw(g && g.hardware) ? g.hardware : "original";
+  return { hw, disp: hw === "original" ? ((g && g.displayType) || "") : "" };
+}
+/* إعداد الجلسة القادمة = آخر إعداد لعبتَ به فعلًا (بالتاريخ لا بترتيب الإضافة،
+   فإضافة تختيمة بتاريخ ماضٍ تُلحق جلسةً أقدم في آخر المصفوفة)، وإلا الموروث. */
+function lastSetup(g) {
+  let best = null, bestT = -Infinity;
+  for (const s of ((g && g.sessions) || [])) {
+    if (!s || !isHw(s.hw)) continue;
+    const t = Date.parse(s.at) || 0;
+    if (t >= bestT) { bestT = t; best = s; }
+  }
+  return best ? { hw: best.hw, disp: best.hw === "original" ? (best.disp || "") : "" } : legacySetup(g);
+}
+/* يضع طريقة التشغيل على جلسة أو تختيمة. المصدر الوحيد لكتابة `hw`/`disp`،
+   فلا يمكن أن يولد سجلٌّ بلا طريقة تشغيل (خطأ ٣: قيمة يتيمة بلا واجهة). */
+function stampSetup(o, setup) {
+  const st = setup || {};
+  const hw = isHw(st.hw) ? st.hw : "original";
+  const out = { ...o, hw };
+  if (hw === "original" && st.disp) out.disp = st.disp;else delete out.disp;
+  return out;
+}
 // ——— توحيد مصدر وقت اللعب ———
 // يبني جلسة مؤرَّخة من ساعات مُدخلة يدويًا (إضافة سريعة / تختيمة)
-function mkSess(dateStr, hrs, src, note) {
+// ⚠️ المسارات الأربعة التي تنشئ جلسات تمرّ من هنا وحدها — لا تنشئ جلسة يدويًا
+// في مكان خامس (خطأ ٧: دعم أُضيف لمسار ونُسي الآخر).
+function mkSess(dateStr, hrs, src, note, setup) {
   hrs = Number(hrs) || 0;
   if (hrs <= 0) return [];
   const at = (typeof dateStr === "string" && dateStr.length === 10) ? new Date(dateStr + "T12:00:00").toISOString() : new Date().toISOString();
-  const o = { at, ms: Math.round(hrs * 3600000), src: src || "manual" };
+  const o = stampSetup({ at, ms: Math.round(hrs * 3600000), src: src || "manual" }, setup);
   if (note) o.note = String(note).slice(0, 300);
   return [o];
 }
@@ -6705,6 +6748,29 @@ function migrateGame(g) {
     changed = true;
     newG.platform = NSO_PLATFORM[newG.nsoSystem];
     newG.playedOn = newG.playedOn || "Nintendo Switch 2";
+  }
+  /* ---------- نقل محور التشغيل من اللعبة إلى الجلسة ----------
+     بلا فقد: النموذج القديم لم يسمح بأكثر من طريقة تشغيل واحدة للعبة، فكل
+     ساعاتها وقعت على إعدادها الحالي بالضرورة. نوسم كل سجلّ لم يُوسَم بعد. */
+  {
+    const setup = legacySetup(newG);
+    if ((newG.sessions || []).some(s => s && !isHw(s.hw))) {
+      newG.sessions = newG.sessions.map(s => s && !isHw(s.hw) ? stampSetup(s, setup) : s);
+      changed = true;
+    }
+    if ((newG.playthroughs || []).some(p => p && !isHw(p.hw))) {
+      newG.playthroughs = newG.playthroughs.map(p => p && !isHw(p.hw) ? stampSetup(p, setup) : p);
+      changed = true;
+    }
+    /* تختيمات الأجزاء والأهداف سجلّ ثالث للتختيم — تركُها بلا وسم كان سيولّد
+       صنفًا يتيمًا يظهر حين تعتمد المقاييس على `hw` في مرحلة لاحقة. */
+    for (const key of ["parts", "goals"]) {
+      if (!(newG[key] || []).some(pt => pt && (pt.runs || []).some(r => r && !isHw(r.hw)))) continue;
+      newG[key] = newG[key].map(pt => pt && (pt.runs || []).some(r => r && !isHw(r.hw))
+        ? { ...pt, runs: pt.runs.map(r => r && !isHw(r.hw) ? stampSetup(r, setup) : r) }
+        : pt);
+      changed = true;
+    }
   }
   /* ترميم: جلسات RA المستوردة سابقًا كانت "backfill" فاستُثنيت من كل الإحصائيات
      وXP والسلاسل. نعيد وسمها كوقت لعب حقيقي فتدخل في كل شيء بتاريخها الصحيح. */
@@ -6825,7 +6891,7 @@ function applyArcadeAutoComplete(g) {
       if (!a.used && sc > best) { best = sc; bestIdx = idx; }
     });
     if (bestIdx >= 0) attempts = attempts.map((a, idx) => idx === bestIdx ? { ...a, used: true } : a);
-    pts.push({ date: today, score: best, hours: 0 });
+    pts.push(stampSetup({ date: today, score: best, hours: 0 }, lastSetup(g)));
   }
   pts = pts.map((p, i) => ({ ...p, n: i + 1 }));
   return { ...g, playthroughs: pts, scoreAttempts: attempts, status: "completed", dateCompleted: today, lastPlayed: nowISO() };
@@ -7997,7 +8063,7 @@ function App() {
       const ng = {
         ...g,
         hours: r1((Number(g.hours) || 0) + hoursToAdd),
-        sessions: [...(g.sessions || []), ...mkSess(null, hoursToAdd, "manual", note)],
+        sessions: [...(g.sessions || []), ...mkSess(null, hoursToAdd, "manual", note, lastSetup(g))],
         lastPlayed: nowISO(),
         parts: partIdx >= 0 && partIdx < 1000 ? (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.parts,
         goals: partIdx >= 1000 ? (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + hoursToAdd) } : pt) : g.goals
@@ -8670,11 +8736,11 @@ function App() {
       if (g.id !== id) return g;
       if (partIdx < 0 && g.arcadeMode) {
         const score = Math.max(0, Math.round(Number(entry.score) || 0));
-        const pts = [...(g.playthroughs || []), {
+        const pts = [...(g.playthroughs || []), stampSetup({
           date: entry.date,
           score: score,
           hours: 0
-        }].map((p, i) => ({
+        }, lastSetup(g))].map((p, i) => ({
           ...p,
           n: i + 1
         }));
@@ -8690,21 +8756,21 @@ function App() {
       if (partIdx >= 1000) return {
         ...g,
         hours: r1((Number(g.hours) || 0) + entered),
-        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run")],
+        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run", null, lastSetup(g))],
         lastPlayed: nowISO(),
-        goals: (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), { date: entry.date, hours: entered }] } : pt)
+        goals: (g.goals || []).map((pt, i) => i === partIdx - 1000 ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), stampSetup({ date: entry.date, hours: entered }, lastSetup(g))] } : pt)
       };
       if (partIdx >= 0) return {
         ...g,
         hours: r1((Number(g.hours) || 0) + entered),
-        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run")],
+        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run", null, lastSetup(g))],
         lastPlayed: nowISO(),
-        parts: (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), { date: entry.date, hours: entered }] } : pt)
+        parts: (g.parts || []).map((pt, i) => i === partIdx ? { ...pt, h: r1((Number(pt.h) || 0) + entered), runs: [...(pt.runs || []), stampSetup({ date: entry.date, hours: entered }, lastSetup(g))] } : pt)
       };
-      const pts = [...(g.playthroughs || []), {
+      const pts = [...(g.playthroughs || []), stampSetup({
         date: entry.date,
         hours: entered
-      }].map((p, i) => ({
+      }, lastSetup(g))].map((p, i) => ({
         ...p,
         n: i + 1
       }));
@@ -8715,7 +8781,7 @@ function App() {
         dateCompleted: entry.date,
         lastPlayed: nowISO(),
         hours: r1((Number(g.hours) || 0) + entered),
-        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run")]
+        sessions: [...(g.sessions || []), ...mkSess(entry.date, entered, "run", null, lastSetup(g))]
       };
     });
     setGames(list);

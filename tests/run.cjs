@@ -663,6 +663,99 @@ G("⑪ اتساق نقاط الخبرة الكلية");
   ok(C.challengeXp(gs) + C.streakXp(gs) > 0, "التحديات والسلسلة تساهم فعلًا فلا يجوز إغفالهما");
 }
 
+/* ═══════════ ⑫ محورا التشغيل والملكية ═══════════ */
+G("⑫ التشغيل صفة على الجلسة، والملكية مشتقّة");
+{
+  /* المرحلة ١ من فصل الجهاز عن الملكية: `hardware` كان صفة دائمة على اللعبة
+     فمنعها من أن تُلعب على المحاكي مرّة وعلى الجهاز الأصلي مرّة. صار
+     `s.hw` هو مصدر الحقيقة، و`g.hardware` بيانات موروثة تُقرأ للترحيل. */
+
+  /* --- الملكية: دالة تامّة من type، بلا حقل مخزَّن يمكن أن ينحرف --- */
+  ok(C.isOwned(game({ type: "physical" })), "ملموس ⇒ مملوكة");
+  ok(C.isOwned(game({ type: "digital" })), "شراء من المتجر ⇒ مملوكة");
+  ok(!C.isOwned(game({ type: "downloaded" })), "محمّلة ⇒ غير مملوكة");
+  ok(!C.isOwned(game({ type: "subscription" })), "اشتراك ⇒ غير مملوكة");
+  ok(!C.isOwned(null), "isOwned(null) لا ينهار");
+  eq(C.migrateGame(game({ type: "physical" })).game.owned, undefined,
+    "لا يُخزَّن حقل owned — حقلان لسؤال واحد ينحرفان (القاعدة الذهبية ٧)");
+  /* الملكية والتشغيل محوران مستقلّان: 42 لعبة في مكتبة المستخدم على جهاز
+     أصلي بنسخة غير مملوكة. اشتقاق أحدهما من الآخر يفسد الإحصاء. */
+  ok(!C.isOwned(game({ hardware: "original", type: "downloaded" })),
+    "جهاز أصلي بنسخة محمّلة ⇒ غير مملوكة (المحوران مستقلّان)");
+
+  /* --- الترحيل يوسم كل سجلّ بطريقة تشغيله --- */
+  const mg = o => C.migrateGame(game(o)).game;
+  eq(mg({ hardware: "emulator", sessions: [sess("2026-01-01", 2)] }).sessions[0].hw, "emulator",
+    "جلسة لعبة محاكي تُوسَم emulator");
+  eq(mg({ hardware: "original", sessions: [sess("2026-01-01", 2)] }).sessions[0].hw, "original",
+    "جلسة لعبة جهاز أصلي تُوسَم original");
+  eq(mg({ sessions: [sess("2026-01-01", 2, "backfill")] }).sessions[0].hw, "original",
+    "حتى الجلسة التعويضية تُوسَم — لا صنف يتيم (خطأ ٣)");
+  eq(mg({ hardware: "emulator", playthroughs: [{ date: "2026-01-01", hours: 5, n: 1 }] }).playthroughs[0].hw,
+    "emulator", "التختيمة تُوسَم أيضًا");
+  eq(mg({ hardware: "emulator", parts: [{ name: "ج١", runs: [{ date: "2026-01-01", hours: 3 }] }] })
+    .parts[0].runs[0].hw, "emulator", "تختيمات الأجزاء تُوسَم — سجلّ التختيم الثالث");
+  eq(mg({ hardware: "emulator", goals: [{ name: "هـ", runs: [{ date: "2026-01-01", hours: 3 }] }] })
+    .goals[0].runs[0].hw, "emulator", "تختيمات الأهداف تُوسَم كذلك");
+  eq(mg({ hardware: "  ", sessions: [sess("2026-01-01", 2)] }).sessions[0].hw, "original",
+    "قيمة hardware تالفة ⇒ original لا قيمة يتيمة");
+
+  /* --- نوع الشاشة ينتقل مع التشغيل الأصلي وحده --- */
+  eq(mg({ hardware: "original", displayType: "crt", sessions: [sess("2026-01-01", 2)] }).sessions[0].disp,
+    "crt", "CRT ينتقل إلى الجلسة");
+  eq(mg({ hardware: "emulator", displayType: "crt", sessions: [sess("2026-01-01", 2)] }).sessions[0].disp,
+    undefined, "جلسة محاكي لا تحمل نوع شاشة");
+  /* بطلب المستخدم صراحةً: لا فرق بين PC وSteam Deck وAyn Thor والجوال وNSO */
+  eq(mg({ hardware: "emulator", emuDevice: "nso", sessions: [sess("2026-01-01", 2)] }).sessions[0].dev,
+    undefined, "جهاز المحاكاة لا يُنقَل إلى الجلسة");
+
+  /* --- الترحيل ثابت: إعادة تشغيله لا تغيّر شيئًا (أخطر فشل صامت) --- */
+  {
+    const once = C.migrateGamesList([game({ hardware: "emulator", displayType: "crt", hours: 2,
+      sessions: [sess("2026-01-01", 2)], playthroughs: [{ date: "2026-01-01", hours: 2, n: 1 }] })]);
+    const twice = C.migrateGamesList(once.games);
+    ok(!twice.changed, "الترحيل ثابت — لا يعيد الكتابة كل تحميل");
+    eq(JSON.stringify(once.games), JSON.stringify(twice.games), "الترحيل الثاني لا يغيّر البيانات");
+  }
+
+  /* --- إنشاء الجلسات: مصدر واحد يستحيل أن يخرج منه سجلّ بلا تشغيل --- */
+  eq(C.mkSess(null, 2, "manual", null, { hw: "emulator" })[0].hw, "emulator",
+    "mkSess يكتب طريقة التشغيل الممرَّرة");
+  eq(C.mkSess(null, 2, "manual")[0].hw, "original",
+    "mkSess بلا إعداد ⇒ original لا undefined");
+  eq(C.mkSess(null, 2, "manual", null, { hw: "emulator", disp: "crt" })[0].disp, undefined,
+    "لا نوع شاشة على جلسة محاكي ولو مُرِّر");
+  eq(C.mkSess(null, 0, "manual", null, { hw: "emulator" }).length, 0,
+    "صفر ساعات لا ينشئ جلسة (سلوك قائم لم ينكسر)");
+
+  /* --- افتراضي الجلسة القادمة = آخر ما لعبتَ به فعلًا، بالتاريخ لا بالترتيب --- */
+  eq(C.lastSetup(game({ hardware: "original" })).hw, "original",
+    "لعبة بلا جلسات ⇒ الإعداد الموروث");
+  eq(C.lastSetup(game({ hardware: "original", displayType: "crt" })).disp, "crt",
+    "الإعداد الموروث يحمل نوع الشاشة");
+  eq(C.lastSetup(game({ hardware: "original", sessions: [
+    { ...sess("2026-01-01", 1), hw: "original" },
+    { ...sess("2026-06-01", 1), hw: "emulator" }
+  ] })).hw, "emulator", "آخر جلسة تُحدّد الافتراضي ولو خالفت حقل اللعبة");
+  eq(C.lastSetup(game({ hardware: "original", sessions: [
+    { ...sess("2026-06-01", 1), hw: "emulator" },
+    { ...sess("2026-01-01", 1), hw: "original" }
+  ] })).hw, "emulator",
+    "الأحدث بالتاريخ لا بموضعه: إضافة تختيمة بتاريخ ماضٍ تُلحق جلسة أقدم في آخر المصفوفة");
+  noThrow(() => C.lastSetup(null), "lastSetup(null) لا ينهار");
+
+  /* --- الحياد التام: لا رقم معروض يتغيّر في هذه المرحلة --- */
+  {
+    const before = [game({ hardware: "emulator", type: "downloaded", hours: 5,
+      sessions: [sess("2026-01-01", 5)], playthroughs: [{ date: "2026-01-01", hours: 5, n: 1 }] })];
+    const after = C.migrateGamesList(before).games;
+    eq(C.baseXp(after), C.baseXp(before), "الترحيل لا يمسّ نقاط الخبرة");
+    eq(C.miranTotal(after), C.miranTotal(before), "الترحيل لا يمسّ نقاط المِران");
+    eq(C.realPlayHours(after[0]), C.realPlayHours(before[0]), "الترحيل لا يمسّ الساعات");
+    eq(C.gameScore(after), C.gameScore(before), "الترحيل لا يمسّ نقاط اللعب");
+  }
+}
+
 console.log("\n" + "═".repeat(46));
 console.log(fail === 0 ? "🎉 نجحت كل الاختبارات (" + pass + ")" : "⚠️  نجح " + pass + " — فشل " + fail);
 process.exit(fail ? 1 : 0);
