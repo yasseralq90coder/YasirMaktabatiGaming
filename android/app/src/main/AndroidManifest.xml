@@ -17,7 +17,10 @@
       android:theme="@style/AppTheme"
       android:supportsRtl="true"
       android:allowBackup="true"
-      android:hardwareAccelerated="true">
+      android:hardwareAccelerated="true"
+      <!-- المكتبة تحمل أغلفة base64 داخل IndexedDB مع 1.6MB جافاسكربت:
+           الكومة الافتراضية تضيق فيكثر جمع المهملات ويتقطّع التمرير -->
+      android:largeHeap="true">
 
     <activity
         android:name=".MainActivity"

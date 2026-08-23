@@ -5,8 +5,14 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.Uri
+import android.view.View
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -26,9 +32,34 @@ class MainActivity : AppCompatActivity() {
 
   private val askNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+  /* WebView **يتجاهل** حقول <input type="file"> ما لم تُنفَّذ onShowFileChooser —
+     الزر يُضغط ولا يحدث شيء ولا خطأ. وهذا ما كان يمنع استعادة النسخة
+     الاحتياطية، وهي الطريق الوحيد لنقل المكتبة من الويب إلى التطبيق. */
+  private var filePathCallback: ValueCallback<Array<Uri>>? = null
+  private val pickFile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+    val data = res.data
+    val uris: Array<Uri>? = when {
+      res.resultCode != RESULT_OK -> null
+      data?.data != null -> arrayOf(data.data!!)
+      data?.clipData != null -> (0 until data.clipData!!.itemCount)
+        .map { data.clipData!!.getItemAt(it).uri }.toTypedArray()
+      else -> null
+    }
+    filePathCallback?.onReceiveValue(uris)   // null يلغي الاختيار بنظافة
+    filePathCallback = null
+  }
+
   @SuppressLint("SetJavaScriptEnabled")
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+
+    /* ملء الشاشة: الشريط العلوي كان يغطّي أعلى المحتوى. الأشرطة تظهر بسحبة
+       من الحافة ثم تختفي — سلوك immersive المعتاد. */
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+      systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    }
 
     Reminders.ensureChannels(this)
 
@@ -44,11 +75,27 @@ class MainActivity : AppCompatActivity() {
       allowFileAccess = false
       allowContentAccess = false
       textZoom = 100                    // لا يتبع تكبير خط النظام: التصميم محسوب بدقّة
+      // الأصول محلية ولا شبكة: خزّن ما تستطيع بلا إعادة تحقّق
+      cacheMode = android.webkit.WebSettings.LOAD_CACHE_ELSE_NETWORK
     }
     /* مفعَّل دائمًا لا في التصحيح وحده: نسخة الإصدار هي التي تُثبَّت على الجهاز،
        وبلا chrome://inspect لا سبيل لمعرفة سبب شاشة سوداء. لا يكشف بيانات —
        يفتح فقط لمن وصل الجهاز بحاسب ومعه أمر التصحيح. */
     WebView.setWebContentsDebuggingEnabled(true)
+
+    web.webChromeClient = object : WebChromeClient() {
+      override fun onShowFileChooser(
+        v: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?
+      ): Boolean {
+        filePathCallback?.onReceiveValue(null)      // اختيار سابق لم يكتمل
+        filePathCallback = cb
+        return try {
+          pickFile.launch(params?.createIntent()); true
+        } catch (e: Exception) {
+          filePathCallback = null; false
+        }
+      }
+    }
 
     web.addJavascriptInterface(WebBridge(this), "Android")
 

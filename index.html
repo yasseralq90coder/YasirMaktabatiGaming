@@ -2997,7 +2997,11 @@ function applySwUpdate() {
 
 function registerPWA() {
   // رابط الـmanifest موجود في <head> أصلًا (manifest.json) — لا حاجة لحقنه هنا.
-  if ("serviceWorker" in navigator) {
+  /* ⚠️ لا Service Worker داخل تطبيق أندرويد. وظيفته هناك منعدمة — الأصول
+     في الـAPK أصلًا ولا شبكة تُخزَّن — لكنه يعترض **كل** طلب ويمرّره عبر
+     جافاسكربت، وذلك بطءٌ محض على ملفات محلية. والتذكير صار للنظام لا له.
+     (كان التطبيق بطيئًا لهذا السبب.) */
+  if ("serviceWorker" in navigator && !isAndroidApp()) {
     /* تبديل المتحكّم يعني أن النسخة الجديدة تولّت — نعيد التحميل مرة واحدة */
     let reloaded = false;
     navigator.serviceWorker.addEventListener("controllerchange", function () {
