@@ -42,8 +42,33 @@ class WebBridge(private val act: Activity) {
   @JavascriptInterface
   fun getSetting(key: String, def: Int): Int = Prefs.getInt(act, key, def)
 
+  /* ⚠️ تغيير الفاصل أثناء عمل العدّاد يجب أن يعيد الجدولة. بلا ذلك يبقى
+     المنبّه القديم معلّقًا بالقيمة القديمة، فيبدو الإعداد وكأنه لم يُطبَّق —
+     وهو ما وقع فعلًا حين غُيّر من خمس دقائق إلى ثلاث. */
   @JavascriptInterface
-  fun setSetting(key: String, value: Int) = Prefs.setInt(act, key, value)
+  fun setSetting(key: String, value: Int) {
+    Prefs.setInt(act, key, value)
+    if (key == "n_every" && Prefs.timerOn(act)) {
+      val every = value.coerceIn(1, 120) * 60_000L
+      val started = Prefs.timerStarted(act)
+      val elapsed = System.currentTimeMillis() - started
+      Reminders.schedule(act, Prefs.timerName(act), started, every - (elapsed % every), every)
+    }
+  }
+
+  /* حالة إذن الإشعارات: بدونه لا يظهر شيء ولا يُبلَّغ المستخدم بسبب.
+     عرضُها في الواجهة يوفّر جولة تخمين كاملة. */
+  @JavascriptInterface
+  fun notifAllowed(): Boolean =
+    androidx.core.app.NotificationManagerCompat.from(act).areNotificationsEnabled()
+
+  /* تنبيه تجريبي بعد عشر ثوانٍ — يختبر السلسلة كاملة (منبّه ← مستقبِل ←
+     إشعار) بلا انتظار دورة كاملة، ويكشف أي حلقة مكسورة فورًا. */
+  @JavascriptInterface
+  fun testReminder() {
+    Prefs.saveTimer(act, "اختبار التنبيه", System.currentTimeMillis() - 61_000L, 5 * 60_000L)
+    Reminders.schedule(act, "اختبار التنبيه", System.currentTimeMillis() - 61_000L, 10_000L, 5 * 60_000L)
+  }
 
   @JavascriptInterface
   fun getFlag(key: String, def: Boolean): Boolean = Prefs.getBool(act, key, def)

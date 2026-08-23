@@ -3057,20 +3057,24 @@ const isAndroidApp = () => !!andBridge();
 const andSafe = (fn, dflt) => { try { const A = andBridge(); return A ? fn(A) : dflt; } catch (e) { return dflt; } };
 
 function swTimerSync(timer) {
-  try {
-    if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
-    if (timer && timer.running && timer.startedAt)
-      navigator.serviceWorker.controller.postMessage({ type: "timer-start", startedAt: timer.startedAt, accMs: timer.accMs || 0, name: timer.name });
-    else
-      navigator.serviceWorker.controller.postMessage({ type: "timer-stop" });
-  } catch (e) {}
-  /* التذكير الأصلي يتبع نفس نقطة الاختناق: كل مسار يغيّر العدّاد يمرّ بها،
-     فلا يبدأ عدّاد بلا تذكير ولا يتوقّف بلا إلغاء (خطأ ١٣). */
+  const running = !!(timer && timer.running && timer.startedAt);
+  /* ⚠️ التذكير الأصلي **أولًا**. كان بعد كتلة الـSW التي تبدأ بـ`return`
+     عند غياب المتحكّم — و`return` داخل `try` يخرج من الدالة كلها. ولمّا
+     عُطِّل الـSW داخل تطبيق أندرويد اختفى المتحكّم، فصار كل نداء يخرج قبل
+     أن يجدول شيئًا: العدّاد يعمل والتذكير لا يُضبط أبدًا، بلا خطأ ولا أثر. */
   andSafe(A => {
-    if (timer && timer.running && timer.startedAt)
-      A.startTimerReminder(String(timer.name || "اللعبة"), String(timer.startedAt), Number(A.getSetting("n_every", 5)) || 5);
+    if (running) A.startTimerReminder(String(timer.name || "اللعبة"), String(timer.startedAt), Number(A.getSetting("n_every", 5)) || 5);
     else A.stopTimerReminder();
   });
+  /* الـSW للويب وحده. لا `return` هنا — أي حارس يجب أن يلفّ ما يخصّه لا أن
+     يقطع بقية الدالة. */
+  try {
+    const c = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (c) {
+      if (running) c.postMessage({ type: "timer-start", startedAt: timer.startedAt, accMs: timer.accMs || 0, name: timer.name || "اللعبة" });
+      else c.postMessage({ type: "timer-stop" });
+    }
+  } catch (e) {}
 }
 
 
@@ -7169,6 +7173,8 @@ function BackupView({
   const [nPat, setNPat] = useState(1);
   const [nSticky, setNSticky] = useState(false);
   const [nExact, setNExact] = useState(true);
+  const [nAllowed, setNAllowed] = useState(true);
+  const [nTest, setNTest] = useState("");
   useEffect(() => { andSafe(A => {
     setNOn(A.getFlag("n_timer", true));
     setNEvery(A.getSetting("n_every", 5));
@@ -7176,6 +7182,7 @@ function BackupView({
     setNPat(A.getSetting("n_pattern", 1));
     setNSticky(A.getFlag("n_sticky", false));
     setNExact(A.canScheduleExact());
+    setNAllowed(A.notifAllowed());
   }); }, []);
   const [mrgAsk, setMrgAsk] = useState(null);
   const [mrgBusy, setMrgBusy] = useState(false);
@@ -7606,6 +7613,10 @@ function BackupView({
   }, "🔔 التنبيهات والاهتزاز"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
   }, "تذكير عدّاد اللعب يعمل على مستوى النظام — يصلك ", /*#__PURE__*/React.createElement("b", null, "والتطبيق مغلق تمامًا"), " وبلا أي خادم."),
+  !nAllowed && /*#__PURE__*/React.createElement("div", { className: "auto-msg error" },
+    "⛔ إشعارات التطبيق موقوفة من النظام — لن يظهر أي تنبيه مهما ضبطت هنا. ",
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost", style: { marginTop: 6 },
+      onClick: () => andSafe(A => A.openNotificationSettings()) }, "افتح الإعداد وفعّلها")),
   !nExact && /*#__PURE__*/React.createElement("div", { className: "auto-msg error" },
     "⚠️ إذن «المنبّهات الدقيقة» غير ممنوح — سيتأخّر التذكير إلى نافذة صيانة النظام. ",
     /*#__PURE__*/React.createElement("button", { className: "btn ghost", style: { marginTop: 6 },
@@ -7634,9 +7645,14 @@ function BackupView({
       onChange: e => { const v = e.target.checked; setNSticky(v); andSafe(A => A.setFlag("n_sticky", v)); } }),
     /*#__PURE__*/React.createElement("span", null, "📌 ", /*#__PURE__*/React.createElement("b", null, "إشعار لا يُمسح بالسحب"), " — يبقى حتى توقف العدّاد")),
   /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
+    /*#__PURE__*/React.createElement("button", {
+      className: "btn primary",
+      onClick: () => { andSafe(A => A.testReminder()); setNTest("سيصلك تنبيه تجريبي خلال ١٠ ثوانٍ. أغلق التطبيق الآن لتتأكّد أنه يصل وهو مغلق."); }
+    }, "🔔 جرّب التنبيه الآن"),
     /*#__PURE__*/React.createElement("button", { className: "btn ghost",
       onClick: () => andSafe(A => A.openNotificationSettings()) },
       "⚙️ إعدادات الإشعارات في النظام (الصوت، الأهمية، شاشة القفل)")),
+  nTest && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, nTest),
   /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
     "الصوت ونغمة التنبيه وإظهاره على شاشة القفل يضبطها أندرويد نفسه لكل قناة — ",
     "وهذا مقصود: إعداداتٌ واحدة في مكان واحد بدل نسختين تتعارضان.")),
