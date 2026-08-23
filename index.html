@@ -3355,11 +3355,22 @@ function relates(name, title) {
   const tc = String(title || "").toLowerCase();
   return nt.some(t => tc.includes(t));
 }
-async function pickGame(lang, name) {
+/* هل يطابق إصدار ويكيبيديا السنة التي نعرفها؟ سنةٌ واحدة تسامحًا لاختلاف
+   تواريخ الإصدار بين الأسواق. */
+const wikiYearFits = (got, want) => {
+  const a = Number(got), b = Number(want);
+  return !!(a && b && Math.abs(a - b) <= 1);
+};
+/* ⚠️ بحث ويكيبيديا يرتّب بالشهرة لا بالسنة. «God of War» يعطي إصدار 2018
+   أولًا، فلعبةُ PS2 لعام 2005 في المكتبة كانت تُوصَف بوصف لعبة أخرى تمامًا
+   («released worldwide for the PlayStation 4 in April 2018») — بيانات خاطئة
+   تُعرض بثقة. السنة كانت تُستخرَج أصلًا وتُهمَل في الاختيار؛ صارت تُرجّح. */
+async function pickGame(lang, name, wantYear) {
   const q = name + (lang === "ar" ? " لعبة" : " video game");
   const sUrl = "https://" + lang + ".wikipedia.org/w/api.php?action=query&list=search&srsearch=" + encodeURIComponent(q) + "&srlimit=6&format=json&origin=*";
   const sj = await (await fetch(sUrl)).json();
   const cands = sj && sj.query && sj.query.search || [];
+  let fallback = null;
   for (const hit of cands.slice(0, 4)) {
     if (!relates(name, hit.title)) continue;
     const pj = await wikiSummary(lang, hit.title);
@@ -3400,9 +3411,11 @@ async function pickGame(lang, name) {
     };
     if (year) out.year = year;
     if (developer) out.developer = developer;
-    return out;
+    if (!wantYear) return out;                      // بلا سنة معروفة: أول مطابق كالسابق
+    if (wikiYearFits(year, wantYear)) return out;   // مطابق السنة يفوز فورًا
+    if (!fallback) fallback = out;                  // وإلا نحتفظ به احتياطًا
   }
-  return null;
+  return fallback;
 }
 async function rawgFetch(name, key, platform, opts) {
   const norm = x => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -3455,7 +3468,7 @@ async function fetchGameEnrichment(name, rawgKey, platform, opts) {
      ولنفس السبب نُمرّر platform لـRAWG حتى تُطابَق نسخة المنصّة الصحيحة. */
   const wikiChain = (async () => {
     for (const lang of ["ar", "en"]) {
-      try { const w = await pickGame(lang, name); if (w) return w; } catch (e) {}
+      try { const w = await pickGame(lang, name, opts && opts.year); if (w) return w; } catch (e) {}
     }
     return null;
   })();
@@ -3737,7 +3750,7 @@ function GameDetail({
     setState("loading");
     setMsg("");
     try {
-      const r = await fetchGameEnrichment(game.name, rawgKey, game.platform);
+      const r = await fetchGameEnrichment(game.name, rawgKey, game.platform, { year: game.year });
       if (Number(game.ttbMain) > 0 && r) delete r.ttbMain;
       onEnrich(r);
       setState("done");
@@ -4017,11 +4030,23 @@ function GameDetail({
   /*#__PURE__*/React.createElement("div", { className: "stat-strip" },
     /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, Number(game.hours) > 0 ? fmtHours(game.hours) : "—"), /*#__PURE__*/React.createElement("span", null, "⏱ اللعب" + (bKids.length > 0 ? " (رئيسية)" : ""))),
     bKids.length > 0 && /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, fmtHours((Number(game.hours) || 0) + bKids.reduce((t, k) => t + (Number(k.hours) || 0), 0))), /*#__PURE__*/React.createElement("span", null, "🗂️ مع الداخلية")),
-    /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, (game.sessions || []).length || "—"), /*#__PURE__*/React.createElement("span", null, "🎮 جلسة")),
-    /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, pts.length || "—"), /*#__PURE__*/React.createElement("span", null, "🏁 تختيمة")),
+    /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, (game.sessions || []).length || 0), /*#__PURE__*/React.createElement("span", null, "🎮 جلسة")),
+    /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, pts.length || 0), /*#__PURE__*/React.createElement("span", null, "🏁 تختيمة")),
     (() => { const cut = Date.now() - 14 * 86400000; const h = (game.sessions || []).filter(s => s.src !== "backfill" && new Date(s.at).getTime() >= cut).reduce((t, s) => t + s.ms, 0) / 3600000; return h > 0 ? /*#__PURE__*/React.createElement("div", { className: "stat-cell" }, /*#__PURE__*/React.createElement("b", null, r1(h / 14)), /*#__PURE__*/React.createElement("span", null, "⚡ س/يوم (14ي)")) : null; })()
   ),
   /* ===== التبويبات ===== */
+  /*#__PURE__*/React.createElement("div", {
+    className: "status-pick gd-status"
+  }, Object.keys(STATUSES).map(k => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    className: "status-chip" + (game.status === k ? " on" : ""),
+    style: game.status === k ? {
+      background: STATUSES[k].color + "22",
+      borderColor: STATUSES[k].color,
+      color: STATUSES[k].color
+    } : null,
+    onClick: () => pickStatus(k)
+  }, STATUSES[k].icon, " ", STATUSES[k].label))),
   /*#__PURE__*/React.createElement("div", { className: "dtabs" }, [["overview", "🎮 نظرة"], ["runs", "🏁 تختيمات"]]
     /* تبويب الإنجازات لألعاب المحاكي وحدها. بلا تبويب خاص كانت لوحة RA تحمل
        className "runs-box" فتختفي خارج تبويب التختيمات، وزرّها "btn auto"
@@ -4252,18 +4277,7 @@ function GameDetail({
       fontWeight: 700,
       fontSize: 13
     }
-  }, STATUSES[game.status].icon, " ", STATUSES[game.status].label)), /*#__PURE__*/React.createElement("div", {
-    className: "status-pick gd-status"
-  }, Object.keys(STATUSES).map(k => /*#__PURE__*/React.createElement("button", {
-    key: k,
-    className: "status-chip" + (game.status === k ? " on" : ""),
-    style: game.status === k ? {
-      background: STATUSES[k].color + "22",
-      borderColor: STATUSES[k].color,
-      color: STATUSES[k].color
-    } : null,
-    onClick: () => pickStatus(k)
-  }, STATUSES[k].icon, " ", STATUSES[k].label))),
+  }, STATUSES[game.status].icon, " ", STATUSES[game.status].label)), 
   game.arcadeMode && /*#__PURE__*/React.createElement("div", { className: "runs-box" },
     /*#__PURE__*/React.createElement("div", { className: "runs-head" },
       /*#__PURE__*/React.createElement("span", null, "🎯 محاولات مسجّلة ", attempts.length ? "(" + attempts.length + ")" : ""),
@@ -4658,7 +4672,7 @@ function GameModal({
     setAutoState("loading");
     setAutoMsg("");
     try {
-      const r = await fetchGameEnrichment(g.name, rawgKey, g.platform);
+      const r = await fetchGameEnrichment(g.name, rawgKey, g.platform, { year: g.year });
       if (Number(g.ttbMain) > 0 && r) delete r.ttbMain;
       const {
         coverUrl,
@@ -5669,7 +5683,7 @@ function SagaCard({ s, covers, mode, onOpen }) {
                      : /*#__PURE__*/React.createElement("span", { className: "saga-noart sm" }, "🎮"),
         /*#__PURE__*/React.createElement("div", { className: "saga-gi" },
           /*#__PURE__*/React.createElement("b", null, g.name),
-          /*#__PURE__*/React.createElement("small", null, g.year || "—", (Number(g.hours) || 0) ? " • " + fmtHours(g.hours) : "")),
+          /*#__PURE__*/React.createElement("small", null, g.year || 0, (Number(g.hours) || 0) ? " • " + fmtHours(g.hours) : "")),
         (g.playthroughs || []).length ? /*#__PURE__*/React.createElement("span", { className: "saga-ok" }, "🏁") : null))));
 }
 
@@ -6136,11 +6150,11 @@ function AchievementsView({
         /*#__PURE__*/React.createElement("div", { className: "stat", key: l },
           /*#__PURE__*/React.createElement("div", { className: "stat-n" }, v),
           /*#__PURE__*/React.createElement("div", { className: "stat-l" }, l)))),
-    tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "stat-strip" },
+    tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "miran-strip" },
       [[ach.badgesDone + "/" + BADGES.length, "أوسمة", "#22d3ee"],
        [ach.totalTiers, "رتب مفتوحة", "#a78bfa"],
        [ach.points, "نقاط إنجاز", "#f472b6"]].map(([v, l, c]) =>
-        /*#__PURE__*/React.createElement("div", { className: "ss-cell", key: l },
+        /*#__PURE__*/React.createElement("div", { className: "mn-cell", key: l },
           /*#__PURE__*/React.createElement("b", { style: { color: c } }, v),
           /*#__PURE__*/React.createElement("span", null, l)))), tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "section-title", style: { marginTop: 16 } }, "🎯 ما التالي"),
   tab === "miran" && closest && /*#__PURE__*/React.createElement("div", {
@@ -8139,7 +8153,7 @@ function App() {
       while (cursor < targets.length) {
         const t = targets[cursor++];
         try {
-          const r = await fetchGameEnrichment(t.name, rawgRef.current, t.platform, { skipTrailer: true });
+          const r = await fetchGameEnrichment(t.name, rawgRef.current, t.platform, { skipTrailer: true, year: t.year });
           if (Number(t.ttbMain) > 0 && r) delete r.ttbMain;
           const { coverUrl, ...fields } = r;
           const extra = {};
@@ -9636,10 +9650,10 @@ const CSS = `
 .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:11px; }
 /* صفّ ثانوي: عدّادات التقدّم لا تنافس أرقام مكتبتك في الحجم — ستة مربّعات
    متساوية كانت تعني أن لا شيء منها مهم. */
-.stat-strip{ display:flex; gap:6px; margin-top:8px; padding:8px 10px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); }
-.ss-cell{ flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:1px; text-align:center; }
-.ss-cell b{ font-family:var(--num); font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; }
-.ss-cell span{ font-size:10px; color:var(--txt-4); }
+.miran-strip{ display:flex; gap:6px; margin-top:8px; padding:8px 10px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); }
+.mn-cell{ flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:1px; text-align:center; }
+.mn-cell b{ font-family:var(--num); font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; }
+.mn-cell span{ font-size:10px; color:var(--txt-4); }
 .stat { background:linear-gradient(180deg,var(--s1),var(--card-2)); border:1px solid var(--line); border-radius:var(--r3); padding:17px 8px; text-align:center; box-shadow:var(--sh1); transition:.18s var(--ease); }
 .stat:hover { border-color:var(--line-3); transform:translateY(-2px); }
 .stat-n { font-family:'Chakra Petch',sans-serif; font-size:24px; font-weight:800; font-variant-numeric:tabular-nums; }
@@ -9861,10 +9875,10 @@ const CSS = `
 .pred-box { border:1px dashed #4dd0e155; background:#4dd0e10d; color:color-mix(in srgb, #8fe6f2 var(--tm), var(--tb)); border-radius:var(--r2); padding:11px 13px; font-size:13px; font-weight:700; line-height:1.7; }
 .note-box { display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--well); border:1px solid var(--line); border-radius:var(--r2); padding:11px 12px; flex-wrap:wrap; }
 .timer-section { display:flex; flex-direction:column; gap:10px; margin-top:6px; padding-top:14px; background:linear-gradient(150deg,var(--s1),var(--s2)); border:1px solid var(--line-2); border-radius:var(--r3); padding:13px; box-shadow:var(--sh1); }
-.dbody:not(.tab-overview) :is(.group-box,.ttb-box,.queue-btn,.plat-box,.bundle-box:not(.sess-box),.bundle-parent,.pred-box,.note-box,.info-desc,.wiki-link,.card-meta,.gd-status,.shots-box){display:none}
-.dbody:not(.tab-runs) .runs-box:not(.sess-log){display:none}
+.dbody:not(.tab-overview) :is(.group-box,.ttb-box,.queue-btn,.pred-box,.note-box,.info-desc,.wiki-link,.card-meta,.shots-box){display:none}
+.dbody:not(.tab-runs) :is(.runs-box:not(.sess-log),.plat-box){display:none}
 .dbody:not(.tab-sessions) :is(.sess-box,.sess-log,.sess-log-btn){display:none}
-.dbody:not(.tab-tools) :is(.btn.auto,.cover-tools,.trailer-section,.gd-toolmsg,.shots-btn){display:none}
+.dbody:not(.tab-tools) :is(.btn.auto,.cover-tools,.bundle-box:not(.sess-box),.bundle-parent,.trailer-section,.gd-toolmsg,.shots-btn){display:none}
 .dbody:not(.tab-ra) .ra-box{display:none}
 .dbody.tab-ra > *:not(.dtabs):not(.ra-box){display:none}
 
