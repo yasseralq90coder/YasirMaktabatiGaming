@@ -3,7 +3,7 @@ name: بناء APK
 on:
   push:
     branches: [main]
-    paths: ['index.html', 'games_db.js', 'icon.svg', 'manifest.json', 'android/**', '.github/workflows/android.yml']
+    paths: ['index.html', 'games_db.js', 'vendor/**', 'icon.svg', 'manifest.json', 'android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
 permissions:
@@ -23,8 +23,10 @@ jobs:
       # لا نسخة ثانية من index.html في المستودع.
       - name: تجهيز أصول الويب
         run: |
-          mkdir -p assets-build
+          mkdir -p assets-build/vendor
           cp index.html games_db.js icon.svg manifest.json assets-build/
+          # React محلي: بدونه شاشة سوداء عند أول تشغيل بلا شبكة
+          cp vendor/*.js assets-build/vendor/
           ls -lh assets-build
 
       # APK بجافاسكربت مكسور يُثبَّت ولا يعمل — الفحص قبل البناء لا بعده

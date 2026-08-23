@@ -7,7 +7,7 @@
 
 /* ⚠️ ارفع هذا الرقم مع أي تغيير في الملفات المخزَّنة، وإلا بقي المستخدم على
    نسخة قديمة: قاعدة activate تحذف كل كاش اسمه مختلف، فبلا تغيير الاسم لا يُحذف شيء. */
-const CACHE_VERSION = "v19";
+const CACHE_VERSION = "v20";
 const CACHE_NAME = "gamelib-" + CACHE_VERSION;
 const SHELL_FILES = [
   "./",
@@ -15,8 +15,10 @@ const SHELL_FILES = [
   "./manifest.json",
   "./icon.svg",
   "./games_db.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"
+  /* React محلي لا من CDN: أول تشغيل بلا شبكة كان يعطي شاشة سوداء —
+     يفشل تحميل React فيفشل كل السكربت بلا أثر مرئي. */
+  "./vendor/react.production.min.js",
+  "./vendor/react-dom.production.min.js"
 ];
 
 self.addEventListener("install", event => {

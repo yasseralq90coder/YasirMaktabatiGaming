@@ -45,7 +45,10 @@ class MainActivity : AppCompatActivity() {
       allowContentAccess = false
       textZoom = 100                    // لا يتبع تكبير خط النظام: التصميم محسوب بدقّة
     }
-    WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+    /* مفعَّل دائمًا لا في التصحيح وحده: نسخة الإصدار هي التي تُثبَّت على الجهاز،
+       وبلا chrome://inspect لا سبيل لمعرفة سبب شاشة سوداء. لا يكشف بيانات —
+       يفتح فقط لمن وصل الجهاز بحاسب ومعه أمر التصحيح. */
+    WebView.setWebContentsDebuggingEnabled(true)
 
     web.addJavascriptInterface(WebBridge(this), "Android")
 
