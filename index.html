@@ -7404,6 +7404,9 @@ function BackupView({
       /*#__PURE__*/React.createElement("button", {
         className: "th-tog" + (th.live ? " on" : ""),
         onClick: () => setTh({ live: !th.live }),
+        /* المفتاح مربّع ملوّن بلا نصّ، و aria-pressed وحده يقول «مضغوط» بلا أن
+           يقول مضغوطٌ على ماذا — فيقرؤه القارئ الصوتي «زر، مضغوط» بلا اسم. */
+        "aria-label": "لون اللعبة الحيّ",
         "aria-pressed": !!th.live
       }))
   ), /*#__PURE__*/React.createElement("div", {
