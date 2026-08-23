@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ذراع تحكّم مبسّطة. متجهيّة لا PNG: ملف واحد يخدم كل الكثافات بلا أصول ثنائية -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+  <path
+      android:fillColor="#F5B942"
+      android:pathData="M36,42 L72,42 A18,18 0 0,1 90,60 L90,62 A11,11 0 0,1 72,70 L69,66 L39,66 L36,70 A11,11 0 0,1 18,62 L18,60 A18,18 0 0,1 36,42 Z" />
+  <path android:fillColor="#07080E" android:pathData="M32,50 L38,50 L38,53 L41,53 L41,59 L38,59 L38,62 L32,62 L32,59 L29,59 L29,53 L32,53 Z" />
+  <path android:fillColor="#07080E" android:pathData="M70,51 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+  <path android:fillColor="#07080E" android:pathData="M78,59 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+</vector>

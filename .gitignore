@@ -5,3 +5,12 @@ games_editable*
 # ملفات مسوّدة/اختبار محلية
 scratch_*
 .claude/
+
+# مرحلة بناء أندرويد — تُولَّد وقت البناء، ولا تُرفع (وإلا صار index.html نسختين)
+assets-build/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/gradlew
+android/gradlew.bat

@@ -1,0 +1,55 @@
+name: بناء APK
+
+on:
+  push:
+    branches: [main]
+    paths: ['index.html', 'games_db.js', 'icon.svg', 'manifest.json', 'android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # مصدر واحد: تُنسخ أصول الويب كما هي إلى مرحلة البناء.
+      # لا نسخة ثانية من index.html في المستودع — النسخ يقع وقت البناء فقط.
+      - name: تجهيز أصول الويب
+        run: |
+          mkdir -p assets-build
+          cp index.html games_db.js icon.svg manifest.json assets-build/
+          echo "── الأصول المنسوخة ──"; ls -lh assets-build
+
+      # فحص الصيغة قبل البناء: APK بجافاسكربت مكسور يُثبَّت ولا يعمل
+      - name: فحص صيغة تطبيق الويب
+        run: |
+          awk '/^<script>$/{f=1;next}/<\/script>/{f=0}f' index.html > /tmp/app.js
+          node --check /tmp/app.js
+          node --check sw.js
+          node tests/run.cjs
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: بناء APK
+        working-directory: android
+        run: |
+          gradle wrapper --gradle-version 8.7 --no-daemon
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: إعادة تسمية بالإصدار
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/*.apk \
+             "out/maktabati-${GITHUB_SHA::7}.apk"
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: out/*.apk
+          retention-days: 90

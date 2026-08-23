@@ -3040,6 +3040,18 @@ function swWake() {
   } catch (e) {}
 }
 
+/* ---------- جسر أندرويد ----------
+   نفس الملف يعمل في المتصفح وداخل تطبيق أندرويد. الفرق الوحيد أن الغلاف
+   الأصلي يحقن كائن `Android`، وعندها يجدول النظام تذكيرًا حقيقيًا يصل
+   والتطبيق مغلق تمامًا — وهو ما عجز عنه الويب بلا خادم.
+   بلا الغلاف تبقى كل الاستدعاءات صامتة، فلا تتفرّع النسختان. */
+/* الكشف عند الاستدعاء لا عند التحميل: الغلاف يحقن الكائن قبل تحميل الصفحة،
+   لكن الالتقاط وقت التحميل يجعل السلوك غير قابل للاختبار ويكسره أي ترتيب حقن
+   مختلف. دالةٌ تُسأل كل مرة أرخص وأمتن. */
+const andBridge = () => (typeof window !== "undefined" && window.Android && window.Android.available) ? window.Android : null;
+const isAndroidApp = () => !!andBridge();
+const andSafe = (fn, dflt) => { try { const A = andBridge(); return A ? fn(A) : dflt; } catch (e) { return dflt; } };
+
 function swTimerSync(timer) {
   try {
     if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
@@ -3048,6 +3060,13 @@ function swTimerSync(timer) {
     else
       navigator.serviceWorker.controller.postMessage({ type: "timer-stop" });
   } catch (e) {}
+  /* التذكير الأصلي يتبع نفس نقطة الاختناق: كل مسار يغيّر العدّاد يمرّ بها،
+     فلا يبدأ عدّاد بلا تذكير ولا يتوقّف بلا إلغاء (خطأ ١٣). */
+  andSafe(A => {
+    if (timer && timer.running && timer.startedAt)
+      A.startTimerReminder(String(timer.name || "اللعبة"), String(timer.startedAt), Number(A.getSetting("n_every", 5)) || 5);
+    else A.stopTimerReminder();
+  });
 }
 
 
@@ -7138,6 +7157,22 @@ function BackupView({
   ttbBulk,
   onBulkTtb
 }) {
+  /* إعدادات التنبيه تعيش في التخزين الأصلي لا في IndexedDB: المنبّه يوقظ
+     التطبيق بلا WebView، فلا سبيل لقراءتها من هناك وقت الإشعار. */
+  const [nOn, setNOn] = useState(true);
+  const [nEvery, setNEvery] = useState(5);
+  const [nVib, setNVib] = useState(true);
+  const [nPat, setNPat] = useState(1);
+  const [nSticky, setNSticky] = useState(false);
+  const [nExact, setNExact] = useState(true);
+  useEffect(() => { andSafe(A => {
+    setNOn(A.getFlag("n_timer", true));
+    setNEvery(A.getSetting("n_every", 5));
+    setNVib(A.getFlag("n_vibrate", true));
+    setNPat(A.getSetting("n_pattern", 1));
+    setNSticky(A.getFlag("n_sticky", false));
+    setNExact(A.canScheduleExact());
+  }); }, []);
   const [mrgAsk, setMrgAsk] = useState(null);
   const [mrgBusy, setMrgBusy] = useState(false);
   const [mrgMsg, setMrgMsg] = useState("");
@@ -7560,11 +7595,49 @@ function BackupView({
     style: { width: Math.round(ttbBulk.i / Math.max(1, ttbBulk.total) * 100) + "%" }
   })), ttbBulk.state === "done" && /*#__PURE__*/React.createElement("div", {
     className: "auto-msg done"
-  }, ttbBulk.total ? "وُجد وقت التختيم لـ " + ttbBulk.ok + " من " + ttbBulk.total + " لعبة ✓" : "كل الألعاب محدّد لها وقت تختيم بالفعل ✓")), /*#__PURE__*/React.createElement("div", {
+  }, ttbBulk.total ? "وُجد وقت التختيم لـ " + ttbBulk.ok + " من " + ttbBulk.total + " لعبة ✓" : "كل الألعاب محدّد لها وقت تختيم بالفعل ✓")), isAndroidApp() && /*#__PURE__*/React.createElement("div", {
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
-  }, "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
+  }, "🔔 التنبيهات والاهتزاز"), /*#__PURE__*/React.createElement("p", {
+    className: "bk-desc"
+  }, "تذكير عدّاد اللعب يعمل على مستوى النظام — يصلك ", /*#__PURE__*/React.createElement("b", null, "والتطبيق مغلق تمامًا"), " وبلا أي خادم."),
+  !nExact && /*#__PURE__*/React.createElement("div", { className: "auto-msg error" },
+    "⚠️ إذن «المنبّهات الدقيقة» غير ممنوح — سيتأخّر التذكير إلى نافذة صيانة النظام. ",
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost", style: { marginTop: 6 },
+      onClick: () => andSafe(A => A.openExactAlarmSettings()) }, "افتح الإعداد")),
+  /*#__PURE__*/React.createElement("label", { className: "check" },
+    /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: nOn,
+      onChange: e => { const v = e.target.checked; setNOn(v); andSafe(A => A.setFlag("n_timer", v)); } }),
+    /*#__PURE__*/React.createElement("span", null, "⏱️ ", /*#__PURE__*/React.createElement("b", null, "تذكير العدّاد"), " — ينبّهك إذا بقي شغّالًا بعد أن تخلّص")),
+  /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "كل كم دقيقة؟"),
+  /*#__PURE__*/React.createElement("div", { className: "seg" }, [3, 5, 10, 15, 30].map(v => /*#__PURE__*/React.createElement("button", {
+    key: v, className: nEvery === v ? "on" : "",
+    onClick: () => { setNEvery(v); andSafe(A => A.setSetting("n_every", v)); }
+  }, v + " د"))),
+  /*#__PURE__*/React.createElement("label", { className: "check" },
+    /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: nVib,
+      onChange: e => { const v = e.target.checked; setNVib(v); andSafe(A => A.setFlag("n_vibrate", v)); } }),
+    /*#__PURE__*/React.createElement("span", null, "📳 ", /*#__PURE__*/React.createElement("b", null, "الاهتزاز"))),
+  nVib && /*#__PURE__*/React.createElement("div", { className: "seg-label" }, "نمط الاهتزاز"),
+  nVib && /*#__PURE__*/React.createElement("div", { className: "seg" }, [[0, "خفيف"], [1, "متوسط"], [2, "قوي"]].map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    key: v, className: nPat === v ? "on" : "",
+    onClick: () => { setNPat(v); andSafe(A => { A.setSetting("n_pattern", v); A.testVibrate(v); }); }
+  }, l))),
+  nVib && /*#__PURE__*/React.createElement("div", { className: "bk-desc" }, "اضغط النمط لتجرّبه فورًا."),
+  /*#__PURE__*/React.createElement("label", { className: "check" },
+    /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: nSticky,
+      onChange: e => { const v = e.target.checked; setNSticky(v); andSafe(A => A.setFlag("n_sticky", v)); } }),
+    /*#__PURE__*/React.createElement("span", null, "📌 ", /*#__PURE__*/React.createElement("b", null, "إشعار لا يُمسح بالسحب"), " — يبقى حتى توقف العدّاد")),
+  /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost",
+      onClick: () => andSafe(A => A.openNotificationSettings()) },
+      "⚙️ إعدادات الإشعارات في النظام (الصوت، الأهمية، شاشة القفل)")),
+  /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
+    "الصوت ونغمة التنبيه وإظهاره على شاشة القفل يضبطها أندرويد نفسه لكل قناة — ",
+    "وهذا مقصود: إعداداتٌ واحدة في مكان واحد بدل نسختين تتعارضان.")),
+  /*#__PURE__*/React.createElement("div", { className: "bk-card" }, /*#__PURE__*/React.createElement("div", { className: "bk-title" },
+    "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
   }, "النموذج القديم كان يجبرك على إدخال اللعبة مرّتين لو لعبتها على الجهاز الأصلي وعلى المحاكي. صار السجل الواحد يحمل الطريقتين، فهذه أداة لضمّ ما انقسم: تُجمَع الساعات والجلسات والتختيمات في سجلٍّ واحد. ",
     /*#__PURE__*/React.createElement("b", null, "نفس المنصّة فقط"),

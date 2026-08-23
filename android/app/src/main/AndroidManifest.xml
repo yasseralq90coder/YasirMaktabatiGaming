@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- الإشعارات: POST_NOTIFICATIONS إذن وقت تشغيل منذ أندرويد 13 -->
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.VIBRATE" />
+  <!-- تذكير دقيق يخترق وضع Doze — وهذا جوهر المشكلة: العدّاد يُنسى ساعات -->
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+  <!-- لإعادة تسليح التذكير بعد إعادة تشغيل الجهاز -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+  <application
+      android:label="مكتبتي الجيمرية"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher"
+      android:theme="@style/AppTheme"
+      android:supportsRtl="true"
+      android:allowBackup="true"
+      android:hardwareAccelerated="true">
+
+    <activity
+        android:name=".MainActivity"
+        android:exported="true"
+        android:launchMode="singleTask"
+        android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+        android:windowSoftInputMode="adjustResize">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+
+    <receiver android:name=".ReminderReceiver" android:exported="false" />
+
+    <receiver android:name=".BootReceiver" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

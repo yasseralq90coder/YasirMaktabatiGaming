@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- خلفية داكنة تطابق التطبيق فلا تومض بالأبيض قبل تحميل الويب -->
+  <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+    <item name="android:windowBackground">@color/appBg</item>
+    <item name="android:statusBarColor">@color/appBg</item>
+    <item name="android:navigationBarColor">@color/appBg</item>
+  </style>
+</resources>
