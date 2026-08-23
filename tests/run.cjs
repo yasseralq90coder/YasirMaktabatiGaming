@@ -608,34 +608,10 @@ G("⑨ العملة والرتب والألقاب");
   ok(has([beat(6, 10)], "sprint") === false || true, "الأصناف تعمل");
 }
 
-/* ═══════════ ⑩ عالما المكتبة (النطاق والرتب) ═══════════ */
-G("⑩ عالما المكتبة");
-{
-  const orig = game({ id: "o", hardware: "original", type: "physical", hours: 5,
-    sessions: [sess("2026-08-01", 5)], playthroughs: [{ date: "2026-08-01", hours: 5, n: 1 }] });
-  const emu = game({ id: "e", hardware: "emulator", emuDevice: "pc", type: "downloaded", hours: 2,
-    sessions: [sess("2026-08-02", 2)], playthroughs: [] });
-  const both = [orig, emu];
-
-  eq(C.scopeGames(both, "all").length, 2, "نطاق «الكل» يشمل العالمين");
-  eq(C.scopeGames(both, "original").map(g => g.id), ["o"], "نطاق الأجهزة الأصلية يعزل ألعابه");
-  eq(C.scopeGames(both, "emulator").map(g => g.id), ["e"], "نطاق المحاكاة يعزل ألعابه");
-  eq(C.scopeGames(null, "original"), [], "نطاق على قائمة فارغة لا ينهار");
-  ok(C.inScope(orig, "all") && C.inScope(orig, "original") && !C.inScope(orig, "emulator"),
-    "inScope يفرّق بين العالمين");
-  ok(!C.inScope(null, "original"), "inScope على قيمة فارغة يرجع false لا ينهار");
-
-  /* الرتبتان مستقلّتان: لكل عالم سُلَّمه، ومقياسه هو نفس gameScore على ألعابه */
-  const ro = C.worldRankOf(both, "original"), re = C.worldRankOf(both, "emulator");
-  eq(ro.score, C.gameScore([orig]), "رتبة الأصلي تقيس ألعاب الأصلي وحدها");
-  eq(re.score, C.gameScore([emu]), "رتبة المحاكي تقيس ألعاب المحاكي وحدها");
-  ok(ro.name !== re.name || ro.score !== re.score, "السُلَّمان مختلفان فعلًا");
-  ok(C.ORIGINAL_RANKS[0][1] !== C.EMULATOR_RANKS[0][1], "لكل عالم أسماء رتب خاصة به");
-
-  /* المستوى الموحّد لا يتأثر بالنطاق — هوية واحدة (قرار المستخدم) */
-  eq(C.totalXp(both), C.totalXp(C.scopeGames(both, "all")), "XP الكلي لا يتغيّر بنطاق «الكل»");
-  ok(C.totalXp(both) > C.totalXp([orig]), "XP الكلي يشمل العالمين معًا");
-}
+/* ═══════════ ⑩ سُلَّم الرتب المشترك ═══════════ */
+/* سقط «عالما المكتبة» بالمرحلة ٣ (المُبدِّل والرتبتان)، وبقي rankOn لأنه
+   السُلَّم المشترك للمِران والصيد والرفّ والأركيد — كسره يكسر أربع رتب دفعةً. */
+G("⑩ سُلَّم الرتب المشترك");
 {
   /* rankOn هو السُلَّم المشترك — كسره يكسر أربع رتب دفعةً */
   const L = [[0, "أ", "1"], [10, "ب", "2"], [20, "ج", "3"]];

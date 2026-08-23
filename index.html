@@ -2126,23 +2126,6 @@ function arcadeScore(games) {
 }
 const arcadeRankOf = games => rankOn(ARCADE_RANKS, arcadeScore(games));
 
-/* ---------- عالما المكتبة: الأجهزة الأصلية والمحاكاة ----------
-   عالمان مختلفان في ذهن المستخدم وفي البيانات معًا: الأصلي يُصنَّف بالعائلة
-   والجيل ونوع الشاشة (CRT/HD)، والمحاكاة بجهاز التشغيل وحالة الربط بـRA.
-   المُبدِّل يغيّر ما تعرضه الشاشات فقط — البيانات ومنطق الحساب واحد، فلا
-   تتفرّع المسارات ولا تُضاعَف الأوسمة والمسارات (القاعدة الذهبية 5). */
-const SCOPES = [["all", "الكل", "📚"], ["original", "الأجهزة الأصلية", "🎮"], ["emulator", "المحاكاة", "🧪"]];
-const scopeMeta = sc => SCOPES.find(x => x[0] === sc) || SCOPES[0];
-const inScope = (g, sc) => sc === "all" || !!(g && legacyHw(g) === sc);
-const scopeGames = (list, sc) => sc === "all" ? (list || []) : (list || []).filter(g => inScope(g, sc));
-/* رتبة مستقلّة لكل عالم بجانب المستوى الموحّد — نفس مقياس رتبة اللعب
-   (ساعات حقيقية + 20 لكل تختيمة) مطبَّقًا على ألعاب ذلك العالم وحدها،
-   فلا يوجد مقياس ثانٍ لنفس الشيء (خطأ 14). */
-const ORIGINAL_RANKS = [[0, "هاوي الكارتريدج", "📼"], [40, "جامع الأقراص", "💿"], [120, "حارس الرفّ", "🗄️"], [280, "خبير الأجهزة", "🕹️"], [550, "أمين المتحف", "🏛️"], [950, "سيّد الكلاسيكيات", "👑"], [1600, "أسطورة الصالون", "🌟"]];
-const EMULATOR_RANKS = [[0, "مُجرِّب النواة", "🧪"], [40, "ضابط الإعدادات", "🎛️"], [120, "مهندس المحاكاة", "⚙️"], [280, "صائد الرومات", "💾"], [550, "ساحر الشيدرز", "✨"], [950, "سيّد المحاكاة", "🧙"], [1600, "أسطورة رقمية", "🌌"]];
-const worldLadder = sc => sc === "emulator" ? EMULATOR_RANKS : ORIGINAL_RANKS;
-const worldRankOf = (games, sc) => rankOn(worldLadder(sc), gameScore(scopeGames(games, sc)));
-
 /* ---------- ضغط الصور (حجم صغير جدًا) ---------- */
 const COVER_W = 300; // عرض الغلاف بالبكسل
 const COVER_Q = 0.5; // جودة JPEG
@@ -2761,7 +2744,6 @@ const KEY_RA_USER = "gamelib:rauser";
 const KEY_RA_KEY = "gamelib:rakey";
 const KEY_TIMER = "gamelib:timer";
 const KEY_NSOSUB = "gamelib:nsosub";
-const KEY_SCOPE = "gamelib:scope";
 const KEY_THEME = "gamelib:theme";
 const THEME_DEF = { mode: "dark", accent: "#ffc24b", live: true };
 // إضاءة نسبية (WCAG) — لاختيار حبر مقروء فوق أي لكنة يختارها المستخدم
@@ -3222,52 +3204,6 @@ function FilterChip({
       borderColor: color ? color + "66" : "#2c2f44"
     }
   }, children);
-}
-
-/* ---------- مُبدِّل عالمَي المكتبة ----------
-   شريط ثابت أعلى المحتوى يظهر في المكتبة والإنجازات والإحصائيات (لا الإعدادات).
-   يُغيّر ما تعرضه الشاشات لا البيانات: مصدر واحد ومنطق واحد.
-   يعرض أيضًا رتبة العالم المختار، أو الرتبتين معًا في وضع «الكل». */
-function ScopeBar({ scope, onChange, worldRanks }) {
-  const cur = scope !== "all" ? worldRanks[scope] : null;
-  const count = scope !== "all" ? worldRanks.counts[scope] : null;
-  return /*#__PURE__*/React.createElement("div", { className: "scopebar" },
-    /*#__PURE__*/React.createElement("div", { className: "scope-tabs", role: "tablist" },
-      SCOPES.map(([k, label, icon]) => /*#__PURE__*/React.createElement("button", {
-        key: k,
-        role: "tab",
-        "aria-selected": scope === k,
-        className: "scope-tab" + (scope === k ? " on" : ""),
-        onClick: () => onChange(k)
-      },
-      /*#__PURE__*/React.createElement("span", { className: "sc-ic" }, icon),
-      /*#__PURE__*/React.createElement("span", { className: "sc-lb" }, label),
-      k !== "all" && /*#__PURE__*/React.createElement("span", { className: "sc-n" }, worldRanks.counts[k])))),
-    /* عالم واحد مختار: رتبته وتقدّمها */
-    cur && /*#__PURE__*/React.createElement("div", { className: "scope-rank" },
-      /*#__PURE__*/React.createElement("span", { className: "sr-ic" }, cur.icon),
-      /*#__PURE__*/React.createElement("div", { className: "sr-i" },
-        /*#__PURE__*/React.createElement("b", null, cur.name),
-        /*#__PURE__*/React.createElement("small", null,
-          count, " لعبة • ", cur.score, " نقطة لعب",
-          cur.next ? " • التالية: " + cur.next + " عند " + cur.nextAt : " • أعلى رتبة 🎉")),
-      /*#__PURE__*/React.createElement("div", { className: "sr-bar" },
-        /*#__PURE__*/React.createElement("div", { className: "sr-fill", style: { width: Math.round(cur.pct) + "%" } }))),
-    /* وضع «الكل»: الرتبتان جنبًا إلى جنب */
-    scope === "all" && (worldRanks.counts.original > 0 || worldRanks.counts.emulator > 0) &&
-      /*#__PURE__*/React.createElement("div", { className: "scope-both" },
-        ["original", "emulator"].filter(k => worldRanks.counts[k] > 0).map(k => {
-          const r = worldRanks[k];
-          return /*#__PURE__*/React.createElement("button", {
-            key: k, className: "sb-card", onClick: () => onChange(k)
-          },
-          /*#__PURE__*/React.createElement("span", { className: "sb-ic" }, r.icon),
-          /*#__PURE__*/React.createElement("div", { className: "sb-i" },
-            /*#__PURE__*/React.createElement("b", null, r.name),
-            /*#__PURE__*/React.createElement("small", null, scopeMeta(k)[2], " ", worldRanks.counts[k], " لعبة")),
-          /*#__PURE__*/React.createElement("div", { className: "sr-bar" },
-            /*#__PURE__*/React.createElement("div", { className: "sr-fill", style: { width: Math.round(r.pct) + "%" } })));
-        })));
 }
 
 /* ---------- نافذة الربط اليدوي بـRetroAchievements ----------
@@ -5908,7 +5844,6 @@ function AchievementsView({
   themeMode,
   onOpenGame,
   games,
-  scope,
   covers,
   ach,
   lvl,
@@ -5959,11 +5894,6 @@ function AchievementsView({
   return /*#__PURE__*/React.createElement("div", {
     className: "stats"
   },
-  /* بلا هذا التنويه يبدو الوسام المفتوح وكأنه أُقفل عند تبديل العالم —
-     الفتح يُحسب من المكتبة كاملة، والمعروض هنا تقدّمك داخل هذا العالم. */
-  scope && scope !== "all" && /*#__PURE__*/React.createElement("div", { className: "scope-note" },
-    scopeMeta(scope)[2], " تعرض تقدّمك داخل ", /*#__PURE__*/React.createElement("b", null, scopeMeta(scope)[1]),
-    " فقط. مستواك ونقاط خبرتك تبقى موحَّدة من مكتبتك كاملة، وكذلك فتح الأوسمة."),
   /*#__PURE__*/React.createElement("div", {
     className: "atabs"
   }, [["miran", "🎖️ المِران"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["overview", "📜 الأرشيف"], ["granks", "📜 رتب ألعابي"], ["ranks", "📜 الرتب القديمة"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
@@ -7094,7 +7024,7 @@ function AnnualCertModal({ games, covers, years, year, setYear, onClose }){
   );
 }
 function InsightsView({
-  scope, games, covers, ach, lvl, xp }) {
+  games, covers, ach, lvl, xp }) {
   const [period, setPeriod] = useState("month");
   const [cf, setCf] = useState("");
   const [ct, setCt] = useState("");
@@ -7919,7 +7849,6 @@ function App() {
   const [fEmuDev, setFEmuDev] = useState("all");   // تصنيف عالم المحاكاة
   /* عالم المكتبة المعروض حاليًا. يُحفظ محليًا فيبقى بين الجلسات — المستخدم
      غالبًا يعيش في عالم واحد لفترة، فإعادته لـ«الكل» كل مرة إزعاج. */
-  const [scope, setScope] = useState("all");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedGames, setSelectedGames] = useState(new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
@@ -8157,15 +8086,6 @@ function App() {
   const [swReady, setSwReady] = useState(false);
   useEffect(() => { setSwUpdateHandler(() => setSwReady(true)); }, []);
   const [nsoSub, setNsoSub] = useState({ plan: "expansion", expiry: "" });
-  /* تبديل العالم: يمسح فلاتر العالم الآخر حتى لا تبقى فلترة خفية تُخفي
-     ألعابًا بلا سبب ظاهر (فلتر CRT مثلًا لا معنى له داخل عالم المحاكاة). */
-  const changeScope = useCallback(async sc => {
-    setScope(sc);
-    setFHardware("all");
-    if (sc !== "original") setFCrt(false);
-    if (sc !== "emulator") setFEmuDev("all");
-    try { await sset(KEY_SCOPE, sc); } catch (e) {}
-  }, []);
   const saveNsoSub = useCallback(async v => {
     setNsoSub(v);
     try { await sset(KEY_NSOSUB, v); } catch {}
@@ -8511,7 +8431,6 @@ function App() {
       setGames(list);
       gamesRef.current = list;
       try { const ns = await sget(KEY_NSOSUB); if (ns && typeof ns === "object") setNsoSub({ plan: ns.plan || "expansion", expiry: ns.expiry || "" }); } catch {}
-      try { const sc = await sget(KEY_SCOPE); if (SCOPES.some(x => x[0] === sc)) setScope(sc); } catch {}
       // أساس الإنجازات (بدون احتفال عند التحميل)
       try {
         const keys = computeAchievements(list).unlockedKeys;
@@ -8957,22 +8876,9 @@ function App() {
   const ach = useMemo(() => computeAchievements(realGames(games)), [games]);
   const xp = useMemo(() => totalXp(games), [games]);
   const lvl = useMemo(() => levelInfo(xp), [xp]);
-  /* ألعاب العالم المعروض. المستوى وXP يبقيان موحَّدين عمدًا — هويتك واحدة —
-     بينما الإحصائيات وتقدّم المسارات تُعرَض داخل العالم المختار. */
-  const scoped = useMemo(() => scopeGames(games, scope), [games, scope]);
-  const scopedAch = useMemo(() => scope === "all" ? ach : computeAchievements(realGames(scoped)), [ach, scoped, scope]);
-  /* رتبتان مستقلّتان: واحدة لكل عالم، تظهران معًا في «الكل» */
   /* رتبة المِران — صارت الرتبة الرئيسية في الشريط العلوي بدل المستوى.
      النظام القديم (levelInfo/xp) باقٍ في تبويب «📜 الأرشيف» ولم يُحذف. */
   const mrank = useMemo(() => miranRankOf(realGames(games)), [games]);
-  const worldRanks = useMemo(() => ({
-    original: worldRankOf(games, "original"),
-    emulator: worldRankOf(games, "emulator"),
-    counts: {
-      original: games.filter(g => inScope(g, "original")).length,
-      emulator: games.filter(g => inScope(g, "emulator")).length
-    }
-  }), [games]);
   const lastPlayedList = useMemo(() => games.filter(g => g.lastPlayed && !g.arcadeMode).sort((a, b) => String(b.lastPlayed).localeCompare(String(a.lastPlayed))).slice(0, 4), [games]);
   const bestScoreOf = g => Math.max(0, ...(g.playthroughs || []).map(p => Number(p.score) || 0), ...(g.scoreAttempts || []).map(a => Number(a.score) || 0));
   const arcadeList = useMemo(() => games.filter(g => g.arcadeMode && !g.shell).sort((a, b) => String(b.lastPlayed || b.dateAdded || "").localeCompare(String(a.lastPlayed || a.dateAdded || ""))), [games]);
@@ -9081,7 +8987,6 @@ function App() {
       if (fPlat !== "all" && g.platform !== fPlat) return false;
       if (fStatus !== "all" && g.status !== fStatus) return false;
       if (fType !== "all" && g.type !== fType) return false;
-      if (!inScope(g, scope)) return false;
       if (fHardware !== "all" && legacyHw(g) !== fHardware) return false;
       if (fEmuDev !== "all" && legacyEmuDev(g) !== fEmuDev) return false;
       if (fCrt && legacyDisp(g) !== "crt") return false;
@@ -9091,7 +8996,7 @@ function App() {
     const s = [...arr];
     s.sort(cmpBy(sortBy));
     return s;
-  }, [games, search, fFamily, fStatus, fType, fHardware, fEmuDev, fCrt, fPlat, sortBy, scope, kidsMap, childIds]);
+  }, [games, search, fFamily, fStatus, fType, fHardware, fEmuDev, fCrt, fPlat, sortBy, kidsMap, childIds]);
   const showNsoCard = useMemo(() => {
     return false; /* ألعاب NSO تظهر فرادى في المكتبة الآن — البطاقة المجمّعة صارت تكرارًا */
     if (!nsoGames.length || view !== "library") return false;
@@ -9150,11 +9055,7 @@ function App() {
   }, Math.round(mrank.score / 1000) >= 1 ? Math.round(mrank.score / 1000) + "ك" : mrank.score,
     mrank.stars > 0 ? " " + "⭐".repeat(Math.min(3, mrank.stars)) : ""))), /*#__PURE__*/React.createElement("nav", {
     className: "tabs"
-  }, /*#__PURE__*/React.createElement("button", { className: view === "library" ? "on" : "", onClick: () => go("library") }, /*#__PURE__*/React.createElement("i", null, "📚"), /*#__PURE__*/React.createElement("em", null, "المكتبة")), /*#__PURE__*/React.createElement("button", { className: view === "stats" ? "on" : "", onClick: () => go("stats") }, /*#__PURE__*/React.createElement("i", null, "🏆"), /*#__PURE__*/React.createElement("em", null, "الإنجازات")), /*#__PURE__*/React.createElement("button", { className: view === "insights" ? "on" : "", onClick: () => go("insights") }, /*#__PURE__*/React.createElement("i", null, "📊"), /*#__PURE__*/React.createElement("em", null, "الإحصائيات")), /*#__PURE__*/React.createElement("button", { className: view === "backup" ? "on" : "", onClick: () => go("backup") }, /*#__PURE__*/React.createElement("i", null, "⚙️"), /*#__PURE__*/React.createElement("em", null, "الإعدادات"))), view !== "backup" && /*#__PURE__*/React.createElement(ScopeBar, {
-    scope: scope,
-    onChange: changeScope,
-    worldRanks: worldRanks
-  }), view === "library" && /*#__PURE__*/React.createElement(React.Fragment, null,
+  }, /*#__PURE__*/React.createElement("button", { className: view === "library" ? "on" : "", onClick: () => go("library") }, /*#__PURE__*/React.createElement("i", null, "📚"), /*#__PURE__*/React.createElement("em", null, "المكتبة")), /*#__PURE__*/React.createElement("button", { className: view === "stats" ? "on" : "", onClick: () => go("stats") }, /*#__PURE__*/React.createElement("i", null, "🏆"), /*#__PURE__*/React.createElement("em", null, "الإنجازات")), /*#__PURE__*/React.createElement("button", { className: view === "insights" ? "on" : "", onClick: () => go("insights") }, /*#__PURE__*/React.createElement("i", null, "📊"), /*#__PURE__*/React.createElement("em", null, "الإحصائيات")), /*#__PURE__*/React.createElement("button", { className: view === "backup" ? "on" : "", onClick: () => go("backup") }, /*#__PURE__*/React.createElement("i", null, "⚙️"), /*#__PURE__*/React.createElement("em", null, "الإعدادات"))), view === "library" && /*#__PURE__*/React.createElement(React.Fragment, null,
   lastG && covers[lastG.id] && /*#__PURE__*/React.createElement("div", { className: "bg-hero", style: { backgroundImage: "url(" + covers[lastG.id] + ")" } }),
   lastG && (() => {
     const run = timer && timer.gameId === lastG.id;
@@ -9350,23 +9251,20 @@ function App() {
     active: fType === k,
     onClick: () => setFType(k)
   }, l))),
-  /* فلتر التشغيل يظهر في «الكل» وحده — داخل عالمٍ محدَّد يكون قد حُسم أصلًا */
-  scope === "all" && /*#__PURE__*/React.createElement(React.Fragment, null,
+  /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "🎮 التشغيل"),
     /*#__PURE__*/React.createElement("div", { className: "filters" },
       [["all", "الكل"], ["original", "🎮 أصلي"], ["emulator", "🧪 محاكي"]].map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
         key: k, active: fHardware === k, onClick: () => setFHardware(k)
       }, l)))),
-  /* تصنيف عالم المحاكاة: جهاز التشغيل */
-  scope !== "original" && /*#__PURE__*/React.createElement(React.Fragment, null,
+  /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement("span", { className: "fsheet-t" }, "🧪 جهاز المحاكاة"),
     /*#__PURE__*/React.createElement("div", { className: "filters" },
       [["all", "الكل"]].concat(Object.keys(EMU_DEVICES).map(k => [k, EMU_DEVICES[k].icon + " " + EMU_DEVICES[k].label]))
         .map(([k, l]) => /*#__PURE__*/React.createElement(FilterChip, {
           key: k, active: fEmuDev === k, onClick: () => setFEmuDev(k)
         }, l)))),
-  /* تصنيف عالم الأجهزة الأصلية: نوع الشاشة */
-  scope !== "emulator" && /*#__PURE__*/React.createElement("div", {
+  /*#__PURE__*/React.createElement("div", {
     className: "filters", style: { marginTop: 10 }
   }, /*#__PURE__*/React.createElement(FilterChip, { active: fCrt, onClick: () => setFCrt(!fCrt), color: "#f5b942" }, "📺 تم اللعب على CRT فقط"))), /*#__PURE__*/React.createElement("div", {
     className: "fsheet-ft"
@@ -9378,7 +9276,7 @@ function App() {
     onClick: () => setFSheet(false)
   }, "عرض ", filtered.length + (showNsoCard ? 1 : 0), " لعبة")))), /*#__PURE__*/React.createElement("div", {
     className: "count-line"
-  }, filtered.length + (showNsoCard ? 1 : 0), " من ", scoped.length, " لعبة", scope !== "all" ? " " + scopeMeta(scope)[2] : ""), filtered.length === 0 && !showNsoCard ? /*#__PURE__*/React.createElement("div", {
+  }, filtered.length + (showNsoCard ? 1 : 0), " من ", games.length, " لعبة"), filtered.length === 0 && !showNsoCard ? /*#__PURE__*/React.createElement("div", {
     className: "empty"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9459,12 +9357,9 @@ function App() {
   })))), view === "stats" && /*#__PURE__*/React.createElement(AchievementsView, {
     themeMode: theme.mode,
     onOpenGame: id => { const g = games.find(x => x.id === id); if (g) openGame(g); },
-    /* ألعاب العالم المعروض. المستوى وXP يبقيان موحَّدين — الأوسمة تُفتح من
-       مكتبتك كاملة، وما يتغيّر هنا هو تقدّمك المعروض داخل هذا العالم. */
-    games: scoped,
-    scope: scope,
+    games: games,
     covers: covers,
-    ach: scopedAch,
+    ach: ach,
     lvl: lvl,
     xp: xp,
     levelLog: levelLog,
@@ -9474,10 +9369,9 @@ function App() {
     onEditRun: editRun,
     onDeleteRun: deleteRun
   }), view === "insights" && /*#__PURE__*/React.createElement(InsightsView, {
-    games: scoped,
-    scope: scope,
+    games: games,
     covers: covers,
-    ach: scopedAch,
+    ach: ach,
     lvl: lvl,
     xp: xp
   }), view === "backup" && /*#__PURE__*/React.createElement(BackupView, {
@@ -10591,39 +10485,6 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .ghost-big.back{ border-color:rgba(74,222,128,.35); background:rgba(74,222,128,.08); }
 .ghost-big .gb-ic{ font-size:19px; line-height:1; flex:none; }
 .ghost-big b{ font-size:13.5px; color:var(--txt-1); }
-/* ===== مُبدِّل عالمَي المكتبة =====
-   حاويات عمودية — لا تستخدم .track هنا (خطأ ٥: هي flex صف وتسحق الأعمدة). */
-.scopebar{ margin:10px 0 6px; display:flex; flex-direction:column; gap:8px; }
-.scope-tabs{ display:flex; gap:6px; background:var(--well); padding:4px; border-radius:999px; border:1px solid var(--hair); }
-.scope-tab{ flex:1; display:flex; align-items:center; justify-content:center; gap:5px; padding:8px 6px; border:0; border-radius:999px; background:transparent; color:var(--txt-3); font-size:12px; font-weight:700; cursor:pointer; transition:background .18s var(--ease), color .18s var(--ease); }
-.scope-tab:hover:not(.on){ color:var(--txt-1); background:var(--e1); }
-.scope-tab.on{ background:var(--e2); color:var(--txt-1); box-shadow:0 1px 6px rgba(0,0,0,.18); }
-.scope-tab .sc-ic{ font-size:14px; line-height:1; }
-.scope-tab .sc-n{ font-family:var(--num); font-size:10px; font-weight:800; padding:1px 6px; border-radius:999px; background:var(--well); color:var(--txt-4); }
-.scope-tab.on .sc-n{ background:rgba(245,185,66,.16); color:#f5b942; }
-/* رتبة العالم المختار */
-.scope-rank{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); }
-.scope-rank .sr-ic{ font-size:22px; line-height:1; flex:none; }
-.scope-rank .sr-i{ flex:1; min-width:140px; display:flex; flex-direction:column; gap:2px; }
-.scope-rank .sr-i b{ font-size:13px; }
-.scope-rank .sr-i small{ font-size:10.5px; color:var(--txt-4); }
-.sr-bar{ flex-basis:100%; height:5px; border-radius:999px; background:var(--well); overflow:hidden; }
-.sr-fill{ height:100%; background:linear-gradient(90deg,#f5b942,#ffd479); transition:width .5s var(--ease); }
-/* وضع «الكل»: الرتبتان معًا */
-.scope-both{ display:flex; gap:8px; flex-wrap:wrap; }
-.sb-card{ flex:1 1 160px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:9px 11px; border-radius:var(--r2); border:1px solid var(--hair); background:var(--e1); color:var(--txt-1); text-align:start; cursor:pointer; transition:border-color .15s var(--ease), background .15s var(--ease); }
-.sb-card:hover{ border-color:rgba(245,185,66,.45); background:rgba(245,185,66,.06); }
-.sb-card .sb-ic{ font-size:19px; line-height:1; flex:none; }
-.sb-card .sb-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
-.sb-card .sb-i b{ font-size:12px; }
-.sb-card .sb-i small{ font-size:10px; color:var(--txt-4); }
-/* تنويه نطاق الإنجازات */
-.scope-note{ margin:10px 0 0; padding:8px 11px; border-radius:var(--r2); font-size:11px; line-height:1.55; color:var(--txt-3); background:rgba(167,139,250,.09); border:1px solid rgba(167,139,250,.28); }
-.scope-note b{ color:#a78bfa; }
-@media (max-width:380px){
-  .scope-tab .sc-lb{ display:none; }
-  .scope-tab.on .sc-lb{ display:inline; }
-}
 /* سطر إجمالي مصادر الخبرة — يجب أن يطابق الإجمالي المعروض تحت المستوى */
 .sw-nag{ border-color:rgba(74,222,128,.45); }
 .sw-nag .tnag-t:first-child{ color:#4ade80; }
