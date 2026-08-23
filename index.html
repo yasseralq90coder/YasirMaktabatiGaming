@@ -563,7 +563,12 @@ function medalName(k) {
   const names = ["برونزي", "فضّي", "ذهبي", "بلاتيني", "ماسي", "أسطوري"];
   return names[Math.min(Math.floor(k / 2), names.length - 1)];
 }
-const sumHours = g => g.reduce((s, x) => s + (Number(x.hours) || 0), 0);
+/* ⚠️ ساعاتك رقمٌ واحد لا رقمان. كان `sumHours` يجمع حقل `hours` الخام — وهو
+   يضمّ الوقت التعويضي (backfill) الذي تستثنيه XP والمِران والرتب وكل إحصاء.
+   فكان كرت «ساعة لعب» يقول 138 بينما كل ما يُبنى عليه يحسب 122: ستّ عشرة
+   ساعة معروضة لا وجود لها في أي حساب. هذا خطأ ١٤ بعينه (مقياسان لنفس الشيء)،
+   وقد وقع ثلاث مرّات في هذا المشروع. المصدر الآن `realPlayHours` وحده. */
+const totalRealHours = list => (list || []).reduce((t, g) => t + Math.max(0, realPlayHours(g)), 0);
 const TRACKS = [{
   id: "collect",
   icon: "📦",
@@ -603,7 +608,7 @@ const TRACKS = [{
   unit: "ساعة",
   start: 10,
   blurb: "إجمالي ساعات اللعب",
-  metric: g => Math.round(sumHours(g))
+  metric: g => Math.round(totalRealHours(g))
 }, {
   id: "rate",
   icon: "⭐",
@@ -1036,13 +1041,13 @@ const BADGES = [{
   icon: "⏰",
   title: "مدمن الساعات",
   desc: "500 ساعة لعب إجمالًا",
-  check: g => sumHours(g) >= 500
+  check: g => totalRealHours(g) >= 500
 }, {
   id: "hours1000",
   icon: "🕰️",
   title: "ألف ساعة",
   desc: "1000 ساعة لعب إجمالًا",
-  check: g => sumHours(g) >= 1000
+  check: g => totalRealHours(g) >= 1000
 }, {
   id: "five5",
   icon: "🌟",
@@ -2067,14 +2072,19 @@ function predictFinish(game, all){
   const now=Date.now(), span=14*86400000;
   const recent=(game.sessions||[]).filter(s=>s.src!=="backfill"&&now-new Date(s.at).getTime()<=span);
   if(!recent.length) return null;
-  const pace=recent.reduce((t,s)=>t+s.ms/3600000,0)/14;
+  const pace=recent.reduce((t,s)=>t+s.ms/3600000,0)/14;   // ساعات/يوم على مدى أسبوعين
   if(pace<=0.05) return null;
   const gg=(game.genre||"").split("،")[0].split(",")[0].trim();
   const firstRunH=g=>{ const r=[...(g.playthroughs||[])][0]; return r?Number(r.hours)||0:0; };
   const med=a=>{ const s=a.filter(x=>x>0).sort((x,y)=>x-y); return s.length?s[Math.floor(s.length/2)]:0; };
   const done=(all||[]).filter(g=>runsCountOf(g)>0);
-  let target=med(done.filter(g=>(g.genre||"").includes(gg)&&gg).map(firstRunH)) || med(done.map(firstRunH)) || 12;
-  const rem=target-(Number(game.hours)||0);
+  /* ⚠️ كان هذا يتجاهل `ttbMain` ويخترع هدفًا من وسيط تختيماتك، فيظهر سطران
+     متجاوران في نفس التبويب: «3س58د / 11س (36٪)» أي 7 ساعات متبقية، و«~2 س
+     متبقية» — ثلاثة أضعاف الفرق لنفس السؤال. المعدّل العالمي هو الهدف حين
+     يتوفّر، والوسيط بديلٌ عند غيابه لا منافسٌ له. */
+  let target = Number(game.ttbMain) > 0 ? Number(game.ttbMain)
+    : (med(done.filter(g=>(g.genre||"").includes(gg)&&gg).map(firstRunH)) || med(done.map(firstRunH)) || 12);
+  const rem = target - Math.max(0, realPlayHours(game));
   if(rem<=0) return "🔥 يبدو أنك في المراحل الأخيرة — الختم قريب جدًا!";
   const days=Math.ceil(rem/pace);
   if(days>60) return "🔮 بمعدلك الحالي يحتاج الختم أكثر من شهرين (~"+Math.round(rem)+" س متبقية) — كثّف الجلسات 😉";
@@ -5859,13 +5869,15 @@ function AchievementsView({
   const [showGuide, setShowGuide] = useState(false);
   const [wrapM, setWrapM] = useState(new Date().toISOString().slice(0, 7));
   const [certOpen, setCertOpen] = useState(false);
+  const [shutOpen, setShutOpen] = useState(false);   // طيّ الألقاب المقفلة
+  const [featOpen, setFeatOpen] = useState(false);   // طيّ البصمات المقفلة
   const certYears = useMemo(() => availableYears(games), [games]);
   const [certYear, setCertYear] = useState(() => String(new Date().getFullYear()));
   useEffect(() => { if (certYears.length && !certYears.includes(certYear)) setCertYear(certYears[0]); }, [certYears]);
   const [draft, setDraft] = useState({ note: "", hours: 0, date: "" });
   const total = realGames(games).length;
   const done = games.filter(g => g.status === "completed").length;
-  const hours = Math.round(sumHours(games));
+  const hours = Math.round(totalRealHours(games));
   const rank = rankOf(lvl.level);
   const byFamily = useMemo(() => {
     const m = {};
@@ -6439,24 +6451,45 @@ function AchievementsView({
             E("b", { style: { color: col } }, v),
             E("span", null, l)))),
 
-      E("div", { className: "section-title" }, "🏅 الألقاب"),
-      E("div", { className: "title-grid" }, ALL_TITLES.map(t => E("div", {
-        key: t.id, className: "ttl-card" + (got.has(t.id) ? " on" : "")
-      },
-        E("span", { className: "tc-ic" }, t.icon),
-        E("div", { className: "tc-i" }, E("b", null, t.name), E("small", null, t.req)),
-        got.has(t.id) ? E("span", { className: "tc-ok" }, "✓") : null))),
+      /* المقفل لا يأخذ وزن المفتوح: ستة عشر لقبًا رماديًا بحجمها الكامل كانت
+         تملأ الشاشة بلا شيء أنجزتَه. المفتوح يُعرَض، والباقي خلف سطر واحد. */
+      E("div", { className: "section-title" }, "🏅 الألقاب (", titles.length, "/", ALL_TITLES.length, ")"),
+      (() => {
+        const card = t => E("div", { key: t.id, className: "ttl-card" + (got.has(t.id) ? " on" : "") },
+          E("span", { className: "tc-ic" }, t.icon),
+          E("div", { className: "tc-i" }, E("b", null, t.name), E("small", null, t.req)),
+          got.has(t.id) ? E("span", { className: "tc-ok" }, "✓") : null);
+        const open = ALL_TITLES.filter(t => got.has(t.id));
+        const shut = ALL_TITLES.filter(t => !got.has(t.id));
+        return E(React.Fragment, null,
+          open.length > 0 && E("div", { className: "title-grid" }, open.map(card)),
+          open.length === 0 && E("p", { className: "bk-desc" },
+            "لم تفتح لقبًا بعد. اللقب ما تُعرّف به نفسك، وندرته بالنسبة لمكتبتك هي ما يجعله يعني شيئًا."),
+          shut.length > 0 && E("button", {
+            className: "lockbar", onClick: () => setShutOpen(v => !v)
+          }, shutOpen ? "▴ إخفاء المقفلة" : "▾ " + shut.length + " لقبًا بانتظارك"),
+          shutOpen && shut.length > 0 && E("div", { className: "title-grid" }, shut.map(card)));
+      })(),
 
-      E("div", { className: "section-title" }, "🔖 البصمات"),
+      E("div", { className: "section-title" }, "🔖 البصمات (", gotF.size, "/", FEATS.length, ")"),
       E("p", { className: "bk-desc" },
         "حدث فريد يقع مرة. وهنا وحدها يجوز الشرط — قد تعتمد البصمة على معدّل HowLongToBeat أو على RetroAchievements، ",
         "بخلاف اللقب الذي يجب أن يكون في متناول كل لاعب."),
-      E("div", { className: "title-grid" }, FEATS.map(f => E("div", {
-        key: f.id, className: "ttl-card feat" + (gotF.has(f.id) ? " on" : "")
-      },
-        E("span", { className: "tc-ic" }, f.icon),
-        E("div", { className: "tc-i" }, E("b", null, f.name), E("small", null, f.req)),
-        gotF.has(f.id) ? E("span", { className: "tc-ok" }, "✓") : null))),
+      /* نفس قاعدة الألقاب: المقفل خلف سطر واحد لا صفوفًا رمادية بحجمها الكامل */
+      (() => {
+        const card = f => E("div", { key: f.id, className: "ttl-card feat" + (gotF.has(f.id) ? " on" : "") },
+          E("span", { className: "tc-ic" }, f.icon),
+          E("div", { className: "tc-i" }, E("b", null, f.name), E("small", null, f.req)),
+          gotF.has(f.id) ? E("span", { className: "tc-ok" }, "✓") : null);
+        const open = FEATS.filter(f => gotF.has(f.id));
+        const shut = FEATS.filter(f => !gotF.has(f.id));
+        return E(React.Fragment, null,
+          open.length > 0 && E("div", { className: "title-grid" }, open.map(card)),
+          shut.length > 0 && E("button", {
+            className: "lockbar", onClick: () => setFeatOpen(v => !v)
+          }, featOpen ? "▴ إخفاء المقفلة" : "▾ " + shut.length + " بصمة بانتظارك"),
+          featOpen && shut.length > 0 && E("div", { className: "title-grid" }, shut.map(card)));
+      })(),
       E("div", { className: "section-title" }, "📊 المِحكّات"),
       E("p", { className: "bk-desc" },
         "عتبات تتصاعد بلا نهاية، تُولَّد من لعبك لا من قوائم مكتوبة. الجهاز والحقبة بالساعات وحدها — عدد الألعاب اقتناء لا لعب."),
@@ -7120,7 +7153,15 @@ function InsightsView({
     const totH = games.reduce((t,g)=>t+(Number(g.hours)||0), 0);
     const genre = {};
     games.forEach(g => { const k=(g.genre||"").split("،")[0].split(",")[0].trim()||"غير مصنّف"; genre[k]=genre[k]||{n:0,h:0}; genre[k].n++; genre[k].h+=Number(g.hours)||0; });
-    const genreArr = Object.entries(genre).sort((a,b)=>b[1].n-a[1].n).slice(0,10);
+    /* أعلى 5 ثم «أخرى»: الذيل الطويل كان تسعة أعمدة بطول واحد لا تُقرأ، ونوعٌ
+       واحد يبتلع الرسم. الخمسة تُقارَن فعلًا، والباقي رقمٌ واحد صادق. */
+    const genreAll = Object.entries(genre).sort((a,b)=>b[1].n-a[1].n);
+    const genreTop = genreAll.slice(0, 5);
+    const genreRest = genreAll.slice(5);
+    const genreArr = genreRest.length
+      ? genreTop.concat([["أخرى (" + genreRest.length + " أنواع)",
+          { n: genreRest.reduce((t, x) => t + x[1].n, 0), h: genreRest.reduce((t, x) => t + x[1].h, 0) }]])
+      : genreTop;
     const genreMax = Math.max(1, ...genreArr.map(x=>x[1].n));
     const fam = {};
     games.forEach(g => { const f=familyOf(g.platform); fam[f]=fam[f]||{n:0,h:0}; fam[f].n++; fam[f].h+=Number(g.hours)||0; });
@@ -7180,7 +7221,9 @@ function InsightsView({
         E("div",{className:"hm-h"},"🔥 خريطة نشاطك — آخر سنة"),
         E("div",{className:"hm"}, cells.map(cx=>E("span",{key:cx.k,className:"hm-c l"+lv(cx.v),title:cx.k+" • "+r1(cx.v)+"س"}))),
         E("div",{className:"hm-leg"},"أقل ",[0,1,2,3,4].map(i=>E("span",{key:i,className:"hm-c l"+i}))," أكثر")); })(),
-    E("div",{className:"ach-sum"}, [["🏆",ach.points,"نقاط إنجاز","#f5b942"],["🎖️",ach.totalTiers,"رتب مفتوحة","#a78bfa"],["🏅",ach.badgesDone+"/"+BADGES.length,"أوسمة","#22d3ee"],["📈",ach.trackTiers,"مستويات المسارات","#4ade80"],["🔗",ach.seriesTiers,"مستويات السلاسل","#f472b6"]].map(([ic,v,l,c],i)=>E("div",{key:i,className:"ach-sum-cell"},E("span",{className:"as-ic"},ic),E("b",{style:{color:c}},v),E("span",null,l)))),
+    /* حُذف صفّ الأرقام هنا: «نقاط إنجاز» و«رتب مفتوحة» و«أوسمة» كانت تتكرّر
+       حرفيًا في شاشة الإنجازات، فيرى المستخدم الرقم نفسه في مكانين بلا سبب.
+       الإحصائيات تجيب «كيف ألعب؟» لا «كيف أتقدّم؟». */
     E("div",{className:"section-title"}, PERIOD_TITLE[period]),
     E("div",{className:"kpi-grid"},
       Stat("⏱️", fmtHours(headHours), scoped?"ساعات الفترة":"إجمالي اللعب", "#22d3ee"),
@@ -10741,6 +10784,9 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 /* ---------- الإعدادات: صفوف نظيفة ---------- */
 .backup{ padding-top:8px; }
 .bk-card + .bk-card{ margin-top:4px; }
+/* شريط كشف المقفل — سطر واحد بدل صفوف رمادية بحجمها الكامل */
+.lockbar{ display:block; width:100%; margin-top:8px; padding:9px 12px; border:1px dashed var(--hair); border-radius:var(--r2); background:transparent; color:var(--txt-4); font-size:12px; font-weight:700; cursor:pointer; transition:color .15s var(--ease), border-color .15s var(--ease); }
+.lockbar:hover{ color:var(--txt-2); border-color:var(--txt-4); }
 /* ===== دمج نسختَي لعبة واحدة (الإعدادات) =====
    حاويات عمودية — لا تستخدم .track هنا (خطأ ٥: هي flex صف وتسحق الأعمدة). */
 .mrg-set{ margin-top:10px; padding:10px 12px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); }
