@@ -412,18 +412,11 @@ const isOwned = g => !!g && OWNED_TYPES.indexOf(g.type) >= 0;
    فأي تعديل كان يجب أن يطال الموضعين — خطأ ١٥ بعينه. صار دالة واحدة. */
 const ACQ_XP = { physical: 10, digital: 7, downloaded: 1, subscription: 1 };
 const acqXp = g => (!g || isShell(g)) ? 0 : (ACQ_XP[g.type] != null ? ACQ_XP[g.type] : 1);
-/* ---------- قراءة الإعداد المُعلَن (بيانات موروثة) ----------
-   بعد نقل التشغيل إلى الجلسة صارت `hardware`/`emuDevice`/`displayType` إعلانًا
-   قديمًا على اللعبة لا حقيقةَ لعب. كانت **17 مقارنة حرفية** منتشرة عليها في
-   الملف، وتغيير قيمة enum في بعضها دون بعض هو خطأ ١ حرفيًا — ولا يكشفه شيء.
-   فتمرّ كل قراءة من هنا: نقطة واحدة تُعدَّل، وواحدة تُحذف حين تُحذف آخر شاشة
-   تسأل عن الإعلان بدل الواقع.
-
-   ⚠️ **لا تستعملها لسؤال «أين لعبتُها فعلًا»** — ذاك جوابه الجلسات (`s.hw`).
-   هذه تجيب «بماذا أُعلنت عند الإضافة»، وهو سؤال في طريقه للزوال. */
-const legacyHw = g => (g && g.hardware === "emulator") ? "emulator" : "original";
-const legacyDisp = g => (g && legacyHw(g) === "original" && g.displayType) || "";
-const legacyEmuDev = g => (g && legacyHw(g) === "emulator" && g.emuDevice) || "pc";
+/* ⚠️ `hardware` و`emuDevice` و`displayType` **بيانات موروثة لا تُقرأ في التطبيق**.
+   كانت 18 مقارنة حرفية منتشرة عليها، فمرّت مرحلةً بثلاثة موصِّلات ثم زالت كلها
+   حين صارت كل الأسئلة تُوجَّه إلى الجلسات. القارئ الوحيد الباقي هو `legacySetup`
+   داخل الترحيل، وهو ما يوسم به الجلسات القديمة. الحقول تبقى في البيانات عمدًا:
+   حذفها من الملفات قرار منفصل لا يُتَّخذ قبل إصدار كامل بلا مفاجآت (خطآ ٣ و١٠). */
 /* ---------- استعلام التشغيل: «أين لعبتُها فعلًا؟» ----------
    جوابه الجلسات والتختيمات لا الحقل المُعلَن. لعبة لم تُلعب بعد لا تُجيب —
    وهذا هو الصحيح: لم يعد يُسأل عن طريقة التشغيل عند الإضافة، فلا نيّة
@@ -602,7 +595,7 @@ const TRACKS = [{
   unit: "لعبة",
   start: 1,
   blurb: "لعبتها على CRT",
-  metric: g => g.filter(x => legacyDisp(x) === "crt").length
+  metric: g => g.filter(x => playedDisp(x, "crt")).length
 }, {
   id: "hours",
   icon: "⏱️",
@@ -642,7 +635,7 @@ const TRACKS = [{
   unit: "محاكاة",
   start: 3,
   blurb: "ألعاب على محاكي",
-  metric: g => g.filter(x => legacyHw(x) === "emulator").length
+  metric: g => g.filter(x => playedOnHw(x, "emulator")).length
 }, {
   id: "modern",
   icon: "🚀",
@@ -884,14 +877,14 @@ const BADGES = [{
   title: "سيد الكاثود",
   desc: "ختمت لعبة على شاشة CRT",
   hidden: true,
-  check: g => g.some(x => legacyDisp(x) === "crt" && runsCountOf(x) > 0)
+  check: g => g.some(x => playedDisp(x, "crt") && runsCountOf(x) > 0)
 }, {
-  id: "console_hacker",
-  icon: "🏴‍☠️",
-  title: "مخترق الكونسول",
-  desc: "لعبت لعبة عبر محاكي كونسول",
+  id: "both_ways",
+  icon: "🔀",
+  title: "بالطريقتين",
+  desc: "لعبت لعبة واحدة على الجهاز الأصلي وعلى المحاكي",
   hidden: true,
-  check: g => g.some(x => legacyHw(x) === "emulator" && legacyEmuDev(x) === "console")
+  check: g => g.some(x => playedOn(x).length === 2)
 }, {
   id: "cloud_surfer",
   icon: "☁️",
@@ -1073,7 +1066,7 @@ const BADGES = [{
   icon: "🕹️",
   title: "بطل المحاكاة",
   desc: "أنهيت لعبة على محاكي",
-  check: g => g.some(x => legacyHw(x) === "emulator" && x.status === "completed")
+  check: g => g.some(x => (x.playthroughs || []).some(r => r && r.hw === "emulator"))
 }, {
   id: "remaster3",
   icon: "💎",
@@ -2703,9 +2696,14 @@ function raRepeats(g) {
 const raEarnedCount = g => raAchList(g).filter(a => a.earned).length;
 const raTotalCount = g => Number((g && g.ra && g.ra.numAchievements) || 0) || raAchList(g).length;
 const raIsMastered = g => raTotalCount(g) > 0 && raEarnedCount(g) >= raTotalCount(g);
-/* لعبة تُحتسب إنجازاتها: مرتبطة يدويًا + على محاكي. شرط المستخدم الصريح:
-   اللعبة على جهاز أصلي لا تعرض إنجازات ولا تساهم فيها، ولو بقي فيها g.ra. */
-const raShows = g => !!(g && legacyHw(g) === "emulator" && g.raGameId && g.ra);
+/* لعبة تُحتسب إنجازاتها: **مرتبطة يدويًا** لا غير. كانت البوّابة تشترط أيضًا
+   `hardware === "emulator"`، وذلك شرطٌ فقد معناه حين انتقل التشغيل إلى الجلسة:
+   اللعبة الواحدة قد تُلعب بالطريقتين. والشرط يفرض نفسه بالبيانات على أي حال —
+   إنجازات RA لا تُكتسب إلا بلعبٍ على محاكٍ واعٍ بـRA، والربط يدويّ محض. */
+const raShows = g => !!(g && g.raGameId && g.ra);
+/* هل يمكن ربط هذه اللعبة أصلًا؟ سؤالٌ عن **المنصّة** لا عن طريقة التشغيل:
+   RA يغطّي الريترو وحدها، و19 من 39 منصّة لا يدعمها. */
+const raSupportedPlatform = plat => !!RA_ALIASES[plat];
 /* نقاط RA للعبة: نقاط كل إنجاز محصَّل + نصف نقاطه عن كل إعادة كسب.
    نصف لأن التكرار إنجاز حقيقي لكنه أسهل من الأول — يكافئ بلا تضخيم.
    البوابة raShows هنا لا عند المستدعي: baseXp يمرّ على كل الألعاب، ونسيان
@@ -2911,14 +2909,6 @@ function Stars({
     }
   }, "★")));
 }
-const EMU_DEVICES = {
-  pc: { label: "حاسب", icon: "💻" },
-  steamdeck: { label: "Steam Deck", icon: "🎮" },
-  aynthor: { label: "AYN Thor", icon: "📱" },
-  console: { label: "كونسول آخر", icon: "📺" },
-  nso: { label: "Nintendo Switch Online", icon: "🔴" },
-  other: { label: "جهاز آخر", icon: "🧪" }
-};
 /* ---------- اختيار طريقة التشغيل لحظة اللعب ----------
    السؤال يُطرح عند اللعب لا عند الإضافة: نفس اللعبة قد تُلعب على الجهاز
    الأصلي مرّة وعلى المحاكي مرّة. الافتراضي آخر ما لعبتَ به، فلا احتكاك في
@@ -3211,7 +3201,7 @@ const GameCard = React.memo(function GameCard({
     className: "card-body"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-name"
-  }, game.name, legacyDisp(game) === "crt" && " 📺"),
+  }, game.name, playedDisp(game, "crt") && " 📺"),
   /* وسم السَّحب — حالة على البطاقة لا إشعارًا، فمكتبة كبيرة لا تُغرقك بمئات
      التنبيهات أول مرة. يتحوّل من هجر إلى مصالحة حين تعود وتختمها. */
   (() => {
@@ -3710,7 +3700,7 @@ function GameDetail({
   /* الربط بـRA للإنجازات فقط: لا يجلب وقت لعب ولا يخفي العدّاد. كل الساعات
      في هذا التطبيق تُسجَّل يدويًا بالعدّاد أو بالإدخال اليدوي — بلا استثناء. */
   const raLinked = raShows(game);
-  const raCanLink = legacyHw(game) === "emulator";
+  const raCanLink = raSupportedPlatform(game.platform);
   const fetchWorldRecord = async () => {
     if (!raUser || !raKey) { setMsg("أضف اسم مستخدم ومفتاح RetroAchievements من الإعدادات أولًا"); return; }
     setRaState("loading");
@@ -3891,7 +3881,7 @@ function GameDetail({
     style: { backgroundImage: "url(" + cover + ")" }
   }), /*#__PURE__*/React.createElement("div", {
     className: "modal-head gd-z"
-  }, /*#__PURE__*/React.createElement("h2", null, game.name, legacyDisp(game) === "crt" && " 📺"),
+  }, /*#__PURE__*/React.createElement("h2", null, game.name, playedDisp(game, "crt") && " 📺"),
     /*#__PURE__*/React.createElement("div", { className: "head-acts" },
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onEdit, title: "تعديل / حذف" }, "✏️"),
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onClose, title: "إغلاق" }, "✕"))), /*#__PURE__*/React.createElement("div", {
@@ -5893,7 +5883,6 @@ function AchievementsView({
   const [rSort, setRSort] = useState("date");
   const [ragOpen, setRagOpen] = useState("");
   const [ragPlat, setRagPlat] = useState("all");
-  const [ragDev, setRagDev] = useState("all");
   const [ragSort, setRagSort] = useState("earned");
   const runs = useMemo(() => {
     const a = playAchievements(games);
@@ -6499,10 +6488,8 @@ function AchievementsView({
   tab === "racheevos" && (() => {
     const raAll = games.filter(g => raShows(g) && raAchList(g).length);
     const raPlats = [...new Set(raAll.map(g => g.platform))].sort();
-    const raDevs = [...new Set(raAll.map(legacyEmuDev))];
     const raGamesList = raAll
       .filter(g => ragPlat === "all" || g.platform === ragPlat)
-      .filter(g => ragDev === "all" || legacyEmuDev(g) === ragDev)
       .map(g => {
         const list = g.ra.achievements || [];
         const earned = list.filter(a => a.earned);
@@ -6540,11 +6527,7 @@ function AchievementsView({
           raPlats.map(p2 => /*#__PURE__*/React.createElement(FilterChip, {
             key: p2, active: ragPlat === p2, onClick: () => setRagPlat(p2), color: colorOf(p2)
           }, (FAM_ICON[familyOf(p2)] || "📦") + " " + p2))),
-        raDevs.length > 1 && /*#__PURE__*/React.createElement("div", { className: "filters" },
-          /*#__PURE__*/React.createElement(FilterChip, { active: ragDev === "all", onClick: () => setRagDev("all") }, "كل أنواع المحاكاة"),
-          raDevs.map(d => /*#__PURE__*/React.createElement(FilterChip, {
-            key: d, active: ragDev === d, onClick: () => setRagDev(d)
-          }, (EMU_DEVICES[d] ? EMU_DEVICES[d].icon + " " + EMU_DEVICES[d].label : d)))),
+
         /*#__PURE__*/React.createElement("div", { className: "filters" },
           /*#__PURE__*/React.createElement("span", { className: "sort-label" }, "↕️ ترتيب:"),
           [["earned", "الأكثر إنجازًا"], ["pct", "نسبة الإكمال"], ["hours", "ساعات اللعب"], ["name", "الاسم"]].map(([k2, l2]) =>
@@ -6758,6 +6741,61 @@ function migrateGame(g) {
      فلا تظهر لها بطاقة «اربط» ولا لوحة الإنجازات — تعطُّل صامت. */
   if (newG.raGameId && !newG.ra) { newG.raGameId = ""; changed = true; }
   return { game: newG, changed };
+}
+/* ---------- دمج نسختَي لعبة واحدة ----------
+   النموذج القديم كان يجبرك على إدخال اللعبة مرّتين لو لعبتها بطريقتين — في
+   مكتبة المستخدم God of War مُدخَلة مرّتين لهذا السبب وحده، وساعاتها منقسمة
+   بين نصفين. الآن صار للسجل الواحد أن يحمل الطريقتين، فيبقى دمج ما انقسم.
+   **الدمج قرار المستخدم لا استنتاج التطبيق**: «Sonic 2» على السويتش قد تكون
+   Sonic Origins وهي إصدار مختلف فعلًا، فنقترح ولا نفعل.
+
+   يبقى سجلّ الهدف هويةً (الاسم والمنصّة والغلاف) ويُضمّ إليه تاريخ المصدر. */
+const mergeKey = n => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function mergeCandidates(list) {
+  const by = {};
+  for (const g of (list || [])) {
+    if (!g || isShell(g) || g.parentId) continue;
+    const k = mergeKey(g.name);
+    if (!k) continue;
+    (by[k] = by[k] || []).push(g);
+  }
+  return Object.keys(by).filter(k => by[k].length > 1).map(k => by[k]);
+}
+/* يُرجع سجلًّا واحدًا يحمل تاريخ الاثنين. لا يحذف شيئًا — المستدعي يحذف المصدر. */
+function mergeGames(target, source) {
+  if (!target || !source) return target;
+  const sess = [...(target.sessions || []), ...(source.sessions || [])]
+    .sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+  /* التختيمات تُرقَّم من جديد بعد الدمج: الترقيم ترتيبٌ لا معرّف. */
+  const runs = [...(target.playthroughs || []), ...(source.playthroughs || [])]
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))
+    .map((r, i) => ({ ...r, n: i + 1 }));
+  const minDate = (a, b) => (a && b) ? (a < b ? a : b) : (a || b || "");
+  const notes = [target.notes, source.notes].filter(x => (x || "").trim()).join("\n———\n");
+  const out = {
+    ...target,
+    sessions: sess,
+    playthroughs: runs,
+    /* الساعات مجموع الاثنين لا ساعات الهدف — وإلا ضاع نصف وقتك بلا أثر. */
+    hours: r1((Number(target.hours) || 0) + (Number(source.hours) || 0)),
+    scoreAttempts: [...(target.scoreAttempts || []), ...(source.scoreAttempts || [])],
+    dateAdded: minDate(target.dateAdded, source.dateAdded),
+    status: (target.status === "completed" || source.status === "completed") ? "completed" : target.status,
+    dateCompleted: minDate(target.dateCompleted, source.dateCompleted),
+    lastPlayed: [target.lastPlayed, source.lastPlayed].filter(Boolean).sort().pop() || "",
+    notes: notes,
+    arcadeMode: !!(target.arcadeMode || source.arcadeMode),
+    /* الربط بـRA وتاريخ الإنجازات ينتقلان إن كان الهدف بلا ربط — سجلّ التكرار
+       لا يُلفَّق ولا يُدمَج: عدّادان لنفس الإنجاز لا يُجمعان بلا تشويه. */
+    raGameId: target.raGameId || source.raGameId || "",
+    ra: target.ra || source.ra || null,
+    raHist: target.raHist || source.raHist || null,
+    ttbMain: Number(target.ttbMain) > 0 ? target.ttbMain : source.ttbMain,
+    rating: Number(target.rating) > 0 ? target.rating : source.rating
+  };
+  if (!out.ra) { delete out.ra; delete out.raGameId; }
+  if (!out.raHist) delete out.raHist;
+  return out;
 }
 /* ---------- إزالة ما خلّفه استيراد RetroAchievements القديم ----------
    إصدار سابق كان يستورد ألعاب حساب RA للمكتبة ويكتب لها وقت لعب مُصطنَعًا
@@ -7286,6 +7324,7 @@ function BackupView({
   covers,
   ach,
   onRestore,
+  onMerge,
   onRecompress,
   rawgKey,
   onSaveRawgKey,
@@ -7301,6 +7340,10 @@ function BackupView({
   ttbBulk,
   onBulkTtb
 }) {
+  const [mrgAsk, setMrgAsk] = useState(null);
+  const [mrgBusy, setMrgBusy] = useState(false);
+  const [mrgMsg, setMrgMsg] = useState("");
+  const mergeSets = useMemo(() => mergeCandidates(games), [games]);
   const [keyDraft, setKeyDraft] = useState(rawgKey || "");
   const [keySaved, setKeySaved] = useState(false);
   useEffect(() => {
@@ -7720,7 +7763,46 @@ function BackupView({
     className: "bk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bk-title"
-  }, "📤 إنشاء نسخة احتياطية"), /*#__PURE__*/React.createElement("p", {
+  }, "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
+    className: "bk-desc"
+  }, "النموذج القديم كان يجبرك على إدخال اللعبة مرّتين لو لعبتها على الجهاز الأصلي وعلى المحاكي. صار السجل الواحد يحمل الطريقتين، فهذه أداة لضمّ ما انقسم: تُجمَع الساعات والجلسات والتختيمات في سجلٍّ واحد. ",
+    /*#__PURE__*/React.createElement("b", null, "الاقتراح لا يعني التطابق"),
+    " — قد تكون النسختان إصدارين مختلفين فعلًا، فاختر بنفسك أيّهما يبقى."),
+  mergeSets.length === 0
+    ? /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, "لا نسخ مكرّرة في مكتبتك ✓")
+    : mergeSets.map(set => /*#__PURE__*/React.createElement("div", { className: "mrg-set", key: set[0].id },
+        /*#__PURE__*/React.createElement("div", { className: "mrg-name" }, set[0].name),
+        set.map(g => /*#__PURE__*/React.createElement("div", { className: "mrg-row", key: g.id },
+          /*#__PURE__*/React.createElement("div", { className: "mrg-i" },
+            /*#__PURE__*/React.createElement("b", null, g.platform),
+            /*#__PURE__*/React.createElement("small", null,
+              fmtHours(realPlayHours(g)), " • ",
+              (g.playthroughs || []).length, " تختيمة • ",
+              (g.sessions || []).length, " جلسة",
+              g.raGameId ? " • 🏅 مرتبطة بـRA" : "",
+              playedOn(g).length ? " • " + playedOn(g).map(w => w === "emulator" ? "🧪" : "🎮").join(" ") : " • لم تُلعب")),
+          /*#__PURE__*/React.createElement("button", {
+            className: "btn ghost", disabled: mrgBusy,
+            onClick: () => setMrgAsk({ keep: g, drop: set.filter(x => x.id !== g.id)[0] })
+          }, "أبقِ هذه"))))),
+  mrgAsk && /*#__PURE__*/React.createElement("div", { className: "auto-msg idle" },
+    "سيُضمّ سجلّ «", mrgAsk.drop.platform, "» إلى «", mrgAsk.keep.platform, "» ثم يُحذف. ",
+    /*#__PURE__*/React.createElement("b", null, fmtHours(realPlayHours(mrgAsk.drop))), " و", (mrgAsk.drop.sessions || []).length,
+    " جلسة تنتقل. لا رجعة إلا من نسخة احتياطية.",
+    /*#__PURE__*/React.createElement("div", { className: "bk-actions", style: { marginTop: 8 } },
+      /*#__PURE__*/React.createElement("button", {
+        className: "btn primary", disabled: mrgBusy,
+        onClick: async () => {
+          setMrgBusy(true);
+          const ok = await onMerge(mrgAsk.keep.id, mrgAsk.drop.id);
+          setMrgBusy(false); setMrgAsk(null);
+          setMrgMsg(ok ? "تم الدمج ✓" : "تعذّر الدمج");
+        }
+      }, "✅ ادمج"),
+      /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => setMrgAsk(null) }, "إلغاء"))),
+  mrgMsg && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, mrgMsg)),
+  /*#__PURE__*/React.createElement("div", { className: "bk-card" }, /*#__PURE__*/React.createElement("div", { className: "bk-title" },
+    "📤 إنشاء نسخة احتياطية"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
   }, "نسخة كاملة تشمل: ", /*#__PURE__*/React.createElement("b", null, games.length), " لعبة، ", /*#__PURE__*/React.createElement("b", null, coverCount), " غلاف، الإنجازات والبيانات. الحجم التقريبي: ", /*#__PURE__*/React.createElement("b", null, fmtBytes(json.length)), "."), /*#__PURE__*/React.createElement("div", {
     className: "bk-actions"
@@ -8216,7 +8298,7 @@ function App() {
   const raPullAll = useCallback(async () => {
     const u = raUserRef.current, k = raKeyRef.current;
     if (!u || !k) { setRaBulk({ state: "error", i: 0, total: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
-    const emus = gamesRef.current.filter(g => g && legacyHw(g) === "emulator" && !isShell(g));
+    const emus = gamesRef.current.filter(g => g && raSupportedPlatform(g.platform) && !isShell(g));
     if (!emus.length) { setRaBulk({ state: "done", i: 0, total: 0, err: "", none: true }); return; }
     setRaBulk({ state: "running", i: 0, total: emus.length, linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0, err: "" });
     const tally = { linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0 };
@@ -8531,6 +8613,24 @@ function App() {
       });
     })();
   }, [loaded, recompressCovers]);
+  /* دمج نسختَي لعبة واحدة: يبقى الهدف ويُضمّ إليه تاريخ المصدر ثم يُحذف
+     المصدر وغلافه. لا يُستدعى إلا بضغطة صريحة — لا دمج تلقائي أبدًا. */
+  const mergeInto = useCallback(async (targetId, sourceId) => {
+    const cur = gamesRef.current;
+    const t = cur.find(g => g.id === targetId), sg = cur.find(g => g.id === sourceId);
+    if (!t || !sg || targetId === sourceId) return false;
+    const merged = mergeGames(t, sg);
+    const list = cur.filter(g => g.id !== sourceId).map(g => g.id === targetId ? merged : g)
+      .map(g => g.parentId === sourceId ? { ...g, parentId: targetId } : g);
+    setGames(list);
+    gamesRef.current = list;
+    await sset(KEY_GAMES, list);
+    try { await sdel(coverKey(sourceId)); } catch (e) {}
+    setCovers(pv => { const n = { ...pv }; delete n[sourceId]; return n; });
+    coversRef.current = { ...coversRef.current };
+    delete coversRef.current[sourceId];
+    return true;
+  }, []);
   const setParentOf = async (childId, parentId) => {
     const list = gamesRef.current.map(g => g.id === childId ? { ...g, parentId: parentId || "" } : g);
     setGames(list);
@@ -9381,6 +9481,7 @@ function App() {
     covers: covers,
     ach: ach,
     onRestore: handleRestore,
+    onMerge: mergeInto,
     onRecompress: recompressCovers,
     rawgKey: rawgKey,
     onSaveRawgKey: saveRawgKey,
@@ -9389,8 +9490,8 @@ function App() {
     onSaveRaCreds: saveRaCreds,
     raBulk: raBulk,
     onRaPullAll: raPullAll,
-    raLinkedCount: games.filter(g => g.raGameId && legacyHw(g) === "emulator").length,
-    raEmuCount: games.filter(g => legacyHw(g) === "emulator" && !isShell(g)).length,
+    raLinkedCount: games.filter(g => raShows(g)).length,
+    raEmuCount: games.filter(g => raSupportedPlatform(g.platform) && !isShell(g)).length,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
@@ -10629,6 +10730,16 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 /* ---------- الإعدادات: صفوف نظيفة ---------- */
 .backup{ padding-top:8px; }
 .bk-card + .bk-card{ margin-top:4px; }
+/* ===== دمج نسختَي لعبة واحدة (الإعدادات) =====
+   حاويات عمودية — لا تستخدم .track هنا (خطأ ٥: هي flex صف وتسحق الأعمدة). */
+.mrg-set{ margin-top:10px; padding:10px 12px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); }
+.mrg-name{ font-size:13px; font-weight:800; color:var(--txt-1); margin-bottom:6px; }
+.mrg-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px 0; border-top:1px solid var(--hair); }
+.mrg-row:first-of-type{ border-top:0; }
+.mrg-i{ flex:1; min-width:150px; display:flex; flex-direction:column; gap:2px; }
+.mrg-i b{ font-size:12px; color:var(--txt-1); }
+.mrg-i small{ font-size:10.5px; color:var(--txt-4); }
+.mrg-row .btn{ flex:none; padding:5px 12px; font-size:11.5px; }
 .bk-actions .btn, .bk-paste .btn{ flex:1; min-width:0; }
 .bk-text{ font-size:10px; min-height:70px; }
 .bk-steps{ font-size:12px; }
