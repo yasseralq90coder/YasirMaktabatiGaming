@@ -13,8 +13,11 @@ android {
     targetSdk 35
     /* ⚠️ يتزايد مع كل بناء. رقم ثابت يعني أن أندرويد لا يرى نسخة أحدث
        فيرفض التحديث — ولا رسالة خطأ مفهومة، فقط «لم يُثبَّت التطبيق». */
-    versionCode (System.getenv("VERSION_CODE") ?: "1").toInteger()
-    versionName (System.getenv("VERSION_NAME") ?: "1.0")
+    /* ⚠️ إسناد بـ= لا استدعاء. في Groovy تُفسَّر `versionCode (x).toInteger()`
+       كـ`versionCode(x)` ثم `.toInteger()` على ناتجها — فيصل الرقم نصًّا
+       وتُستدعى toInteger على null، والرسالة «Value is null» لا تدلّ على السبب. */
+    versionCode = (System.getenv("VERSION_CODE") ?: "1") as Integer
+    versionName = System.getenv("VERSION_NAME") ?: "1.0"
   }
 
   // BuildConfig.DEBUG يحتاج تفعيلًا صريحًا منذ AGP 8
@@ -41,7 +44,7 @@ android {
     release {
       // بلا تصغير: الأصول HTML/JS لا يمسّها R8، والكود الأصلي بضع مئات الأسطر
       minifyEnabled false
-      signingConfig (System.getenv("KEYSTORE_PATH") ? signingConfigs.release : signingConfigs.debug)
+      signingConfig = System.getenv("KEYSTORE_PATH") ? signingConfigs.release : signingConfigs.debug
     }
   }
   compileOptions {
