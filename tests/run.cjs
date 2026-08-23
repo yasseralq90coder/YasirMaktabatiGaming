@@ -41,17 +41,26 @@ G("① نقاط الخبرة والمستوى");
 noThrow(() => C.baseXp(null), "baseXp(null) لا ينهار");
 noThrow(() => C.baseXp([{}]), "baseXp على لعبة فارغة لا ينهار");
 eq(C.baseXp([game({ type: "physical" })]), 10, "لعبة فيزيائية = 10 نقاط اقتناء");
-eq(C.baseXp([game({ type: "digital" })]), 5, "لعبة رقمية = 5 نقاط");
+/* نقاط الاقتناء تكافئ **الملكية**: ملموس 10 > شراء من المتجر 7 > ما لا تملكه 1.
+   قبلها كانت المحمّلة تعطي 5 كالمشتراة، فلم يفرّق الرقم بين ما تملكه وما لا. */
+eq(C.baseXp([game({ type: "digital" })]), 7, "شراء من المتجر = 7 نقاط");
+eq(C.baseXp([game({ type: "downloaded" })]), 1, "محمّلة (لا تملكها) = نقطة واحدة");
+eq(C.baseXp([game({ type: "subscription" })]), 1, "اشتراك (لا تملكه) = نقطة واحدة");
+ok(C.acqXp(game({ type: "physical" })) > C.acqXp(game({ type: "digital" }))
+  && C.acqXp(game({ type: "digital" })) > C.acqXp(game({ type: "downloaded" })),
+  "سُلّم الاقتناء: ملموس > متجر > غير مملوكة");
+eq(C.acqXp(game({ type: "wat" })), 1, "نوع غير معروف ⇒ نقطة واحدة لا undefined");
+eq(C.acqXp(null), 0, "acqXp(null) لا ينهار");
 eq(C.baseXp([game({ nso: true, type: "subscription" })]), 1, "لعبة NSO = نقطة واحدة");
 eq(C.baseXp([game({ shell: true, type: "physical" })]), 0, "غلاف المجموعة لا يعطي نقاط اقتناء");
-eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3)] })]), 35,
-  "3 ساعات حقيقية = 30 نقطة + 5 اقتناء");
-eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3, "backfill")] })]), 5,
+eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3)] })]), 37,
+  "3 ساعات حقيقية = 30 نقطة + 7 اقتناء");
+eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3, "backfill")] })]), 7,
   "الوقت التعويضي (backfill) لا يعطي XP");
 ok(C.levelInfo(-50).level === 1, "XP سالب ⇒ المستوى 1");
 ok(C.levelInfo(NaN).level === 1, "XP غير رقمي ⇒ المستوى 1");
 ok(C.levelInfo(0).level === 1 && C.levelInfo(C.costFor(1)).level === 2, "حدّ المستوى الأول صحيح");
-ok(C.baseXp([game({ playthroughs: [{ date: "2026-01-01", hours: 99999, n: 1 }] })]) - 5 <= 500,
+ok(C.baseXp([game({ playthroughs: [{ date: "2026-01-01", hours: 99999, n: 1 }] })]) - 7 <= 500,
   "التختيمة الواحدة لا تتجاوز سقف 500 نقطة");
 
 /* ═══════════ ② الرتب ═══════════ */
