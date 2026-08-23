@@ -756,6 +756,67 @@ G("⑫ التشغيل صفة على الجلسة، والملكية مشتقّة
   }
 }
 
+/* ═══════════ ⑬ موصِّلات الإعداد الموروث واستقلال المحورين ═══════════ */
+G("⑬ الموصِّلات الموروثة، و«غير مملوكة» ≠ «محاكي»");
+{
+  /* المرحلة ٢: كانت 18 مقارنة حرفية منتشرة على hardware/emuDevice/displayType.
+     تغيير قيمة enum في بعضها دون بعض هو خطأ ١ حرفيًا، ولا يكشفه شيء. صارت كلها
+     تمرّ بثلاثة موصِّلات، فهذه الاختبارات تحرس نقطة الاختناق نفسها. */
+
+  eq(C.legacyHw(game({ hardware: "emulator" })), "emulator", "legacyHw يقرأ المحاكي");
+  eq(C.legacyHw(game({ hardware: "original" })), "original", "legacyHw يقرأ الجهاز الأصلي");
+  eq(C.legacyHw(game({ hardware: "nso" })), "original", "قيمة يتيمة ⇒ original لا تمريرها كما هي");
+  eq(C.legacyHw(game({ hardware: "" })), "original", "قيمة فارغة ⇒ original");
+  eq(C.legacyHw(null), "original", "legacyHw(null) لا ينهار");
+
+  eq(C.legacyDisp(game({ hardware: "original", displayType: "crt" })), "crt", "CRT على جهاز أصلي يُقرأ");
+  eq(C.legacyDisp(game({ hardware: "original", displayType: "hd" })), "hd", "HD يُقرأ");
+  eq(C.legacyDisp(game({ hardware: "emulator", displayType: "crt" })), "",
+    "لا تسرّب نوع شاشة من لعبة محاكي — CRT صفة تشغيل على جهاز حقيقي");
+  eq(C.legacyDisp(null), "", "legacyDisp(null) لا ينهار");
+
+  eq(C.legacyEmuDev(game({ hardware: "emulator", emuDevice: "nso" })), "nso", "جهاز المحاكاة يُقرأ");
+  eq(C.legacyEmuDev(game({ hardware: "emulator" })), "pc", "بلا جهاز محاكاة ⇒ pc");
+  eq(C.legacyEmuDev(game({ hardware: "original", emuDevice: "nso" })), "pc",
+    "لعبة على جهاز أصلي لا جهاز محاكاة لها مهما كان الحقل");
+  eq(C.legacyEmuDev(null), "pc", "legacyEmuDev(null) لا ينهار");
+
+  /* الموصِّل ينقل المعنى ولا يغيّره: بعد وسم المرحلة ١ يبقى مطابقًا للحقل
+     المُعلَن، ولا ينزلق إلى قراءة الجلسات. */
+  {
+    const g0 = C.migrateGamesList([
+      game({ hardware: "emulator", hours: 2, sessions: [sess("2026-01-01", 2)] }),
+      game({ hardware: "original", displayType: "crt", hours: 2, sessions: [sess("2026-01-01", 2)] })
+    ]).games;
+    eq(g0.map(C.legacyHw), ["emulator", "original"],
+      "الموصِّل يبقى على الحقل المُعلَن بعد الترحيل — لا ينزلق إلى الجلسات");
+  }
+
+  /* ---------- الشرط الحاكم: المحوران مستقلّان ----------
+     لعبة محمّلة على الهارد الداخلي تعمل على الجهاز الأصلي نفسه = تجربة أصلية
+     لا محاكاة. في مكتبة المستخدم 42 لعبة كذلك، تحمل ثلث ساعاته و41 منها على
+     CRT. أي اشتقاق يربط الملكية بالتشغيل يهجّر ثلث نشاطه إلى العالم الخطأ
+     ويُسقط أوسمة CRT — بلا خطأ في الكونسول. خانة لكل حالة: */
+  const cell = (hw, type) => game({ hardware: hw, type: type });
+  ok(C.legacyHw(cell("original", "physical")) === "original" && C.isOwned(cell("original", "physical")),
+    "أصلي + مملوكة");
+  ok(C.legacyHw(cell("original", "downloaded")) === "original" && !C.isOwned(cell("original", "downloaded")),
+    "أصلي + محمّلة على الهارد ⇒ تشغيل أصلي وغير مملوكة معًا (لا محاكاة)");
+  ok(C.legacyHw(cell("emulator", "digital")) === "emulator" && C.isOwned(cell("emulator", "digital")),
+    "محاكي + مملوكة");
+  ok(C.legacyHw(cell("emulator", "downloaded")) === "emulator" && !C.isOwned(cell("emulator", "downloaded")),
+    "محاكي + غير مملوكة");
+
+  /* والحارس الذي يفشل فعلًا لو تسرّب الاشتقاق يومًا: */
+  {
+    const crtOf = gs => C.computeAchievements(gs).tracks.find(t => t.id === "crt").value;
+    eq(crtOf([game({ hardware: "original", type: "downloaded", displayType: "crt" })]), 1,
+      "لعبة محمّلة على جهاز أصلي وشاشة CRT تبقى داخل عدّاد CRT");
+    eq(crtOf([game({ hardware: "emulator", type: "downloaded", displayType: "crt" })]), 0,
+      "ولعبة المحاكي لا تدخله ولو حمل حقلها crt");
+  }
+}
+
 console.log("\n" + "═".repeat(46));
 console.log(fail === 0 ? "🎉 نجحت كل الاختبارات (" + pass + ")" : "⚠️  نجح " + pass + " — فشل " + fail);
 process.exit(fail ? 1 : 0);

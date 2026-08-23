@@ -404,6 +404,18 @@ const realGames = list => (list || []).filter(g => !g.shell);
    غير مملوكة، فلا يُشتقّ أحدهما من الآخر أبدًا. */
 const OWNED_TYPES = ["physical", "digital"];
 const isOwned = g => !!g && OWNED_TYPES.indexOf(g.type) >= 0;
+/* ---------- قراءة الإعداد المُعلَن (بيانات موروثة) ----------
+   بعد نقل التشغيل إلى الجلسة صارت `hardware`/`emuDevice`/`displayType` إعلانًا
+   قديمًا على اللعبة لا حقيقةَ لعب. كانت **17 مقارنة حرفية** منتشرة عليها في
+   الملف، وتغيير قيمة enum في بعضها دون بعض هو خطأ ١ حرفيًا — ولا يكشفه شيء.
+   فتمرّ كل قراءة من هنا: نقطة واحدة تُعدَّل، وواحدة تُحذف حين تُحذف آخر شاشة
+   تسأل عن الإعلان بدل الواقع.
+
+   ⚠️ **لا تستعملها لسؤال «أين لعبتُها فعلًا»** — ذاك جوابه الجلسات (`s.hw`).
+   هذه تجيب «بماذا أُعلنت عند الإضافة»، وهو سؤال في طريقه للزوال. */
+const legacyHw = g => (g && g.hardware === "emulator") ? "emulator" : "original";
+const legacyDisp = g => (g && legacyHw(g) === "original" && g.displayType) || "";
+const legacyEmuDev = g => (g && legacyHw(g) === "emulator" && g.emuDevice) || "pc";
 function migrateGenre(v) {
   if (!v) return "";
   return String(v).split(/[،,]/).map(s => s.trim()).filter(Boolean).map(s => GENRE_MIGRATE[s] || s).join(", ");
@@ -565,7 +577,7 @@ const TRACKS = [{
   unit: "لعبة",
   start: 1,
   blurb: "لعبتها على CRT",
-  metric: g => g.filter(x => x.displayType === "crt").length
+  metric: g => g.filter(x => legacyDisp(x) === "crt").length
 }, {
   id: "hours",
   icon: "⏱️",
@@ -605,7 +617,7 @@ const TRACKS = [{
   unit: "محاكاة",
   start: 3,
   blurb: "ألعاب على محاكي",
-  metric: g => g.filter(x => x.hardware === "emulator").length
+  metric: g => g.filter(x => legacyHw(x) === "emulator").length
 }, {
   id: "modern",
   icon: "🚀",
@@ -847,14 +859,14 @@ const BADGES = [{
   title: "سيد الكاثود",
   desc: "ختمت لعبة على شاشة CRT",
   hidden: true,
-  check: g => g.some(x => x.displayType === "crt" && runsCountOf(x) > 0)
+  check: g => g.some(x => legacyDisp(x) === "crt" && runsCountOf(x) > 0)
 }, {
   id: "console_hacker",
   icon: "🏴‍☠️",
   title: "مخترق الكونسول",
   desc: "لعبت لعبة عبر محاكي كونسول",
   hidden: true,
-  check: g => g.some(x => x.hardware === "emulator" && x.emuDevice === "console")
+  check: g => g.some(x => legacyHw(x) === "emulator" && legacyEmuDev(x) === "console")
 }, {
   id: "cloud_surfer",
   icon: "☁️",
@@ -1036,7 +1048,7 @@ const BADGES = [{
   icon: "🕹️",
   title: "بطل المحاكاة",
   desc: "أنهيت لعبة على محاكي",
-  check: g => g.some(x => x.hardware === "emulator" && x.status === "completed")
+  check: g => g.some(x => legacyHw(x) === "emulator" && x.status === "completed")
 }, {
   id: "remaster3",
   icon: "💎",
@@ -2121,7 +2133,7 @@ const arcadeRankOf = games => rankOn(ARCADE_RANKS, arcadeScore(games));
    تتفرّع المسارات ولا تُضاعَف الأوسمة والمسارات (القاعدة الذهبية 5). */
 const SCOPES = [["all", "الكل", "📚"], ["original", "الأجهزة الأصلية", "🎮"], ["emulator", "المحاكاة", "🧪"]];
 const scopeMeta = sc => SCOPES.find(x => x[0] === sc) || SCOPES[0];
-const inScope = (g, sc) => sc === "all" || !!(g && g.hardware === sc);
+const inScope = (g, sc) => sc === "all" || !!(g && legacyHw(g) === sc);
 const scopeGames = (list, sc) => sc === "all" ? (list || []) : (list || []).filter(g => inScope(g, sc));
 /* رتبة مستقلّة لكل عالم بجانب المستوى الموحّد — نفس مقياس رتبة اللعب
    (ساعات حقيقية + 20 لكل تختيمة) مطبَّقًا على ألعاب ذلك العالم وحدها،
@@ -2685,7 +2697,7 @@ const raTotalCount = g => Number((g && g.ra && g.ra.numAchievements) || 0) || ra
 const raIsMastered = g => raTotalCount(g) > 0 && raEarnedCount(g) >= raTotalCount(g);
 /* لعبة تُحتسب إنجازاتها: مرتبطة يدويًا + على محاكي. شرط المستخدم الصريح:
    اللعبة على جهاز أصلي لا تعرض إنجازات ولا تساهم فيها، ولو بقي فيها g.ra. */
-const raShows = g => !!(g && g.hardware === "emulator" && g.raGameId && g.ra);
+const raShows = g => !!(g && legacyHw(g) === "emulator" && g.raGameId && g.ra);
 /* نقاط RA للعبة: نقاط كل إنجاز محصَّل + نصف نقاطه عن كل إعادة كسب.
    نصف لأن التكرار إنجاز حقيقي لكنه أسهل من الأول — يكافئ بلا تضخيم.
    البوابة raShows هنا لا عند المستدعي: baseXp يمرّ على كل الألعاب، ونسيان
@@ -3161,7 +3173,7 @@ const GameCard = React.memo(function GameCard({
     className: "card-body"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-name"
-  }, game.name, game.displayType === "crt" && " 📺"),
+  }, game.name, legacyDisp(game) === "crt" && " 📺"),
   /* وسم السَّحب — حالة على البطاقة لا إشعارًا، فمكتبة كبيرة لا تُغرقك بمئات
      التنبيهات أول مرة. يتحوّل من هجر إلى مصالحة حين تعود وتختمها. */
   (() => {
@@ -3184,8 +3196,8 @@ const GameCard = React.memo(function GameCard({
     className: "card-meta"
   }, /*#__PURE__*/React.createElement(PlatformBadge, {
     platform: game.platform,
-    hardware: game.hardware,
-    emuDevice: game.emuDevice
+    hardware: legacyHw(game),
+    emuDevice: legacyEmuDev(game)
   })), /*#__PURE__*/React.createElement("div", {
     className: "card-foot"
   }, /*#__PURE__*/React.createElement("span", {
@@ -3705,7 +3717,7 @@ function GameDetail({
   /* الربط بـRA للإنجازات فقط: لا يجلب وقت لعب ولا يخفي العدّاد. كل الساعات
      في هذا التطبيق تُسجَّل يدويًا بالعدّاد أو بالإدخال اليدوي — بلا استثناء. */
   const raLinked = raShows(game);
-  const raCanLink = game.hardware === "emulator";
+  const raCanLink = legacyHw(game) === "emulator";
   const fetchWorldRecord = async () => {
     if (!raUser || !raKey) { setMsg("أضف اسم مستخدم ومفتاح RetroAchievements من الإعدادات أولًا"); return; }
     setRaState("loading");
@@ -3886,7 +3898,7 @@ function GameDetail({
     style: { backgroundImage: "url(" + cover + ")" }
   }), /*#__PURE__*/React.createElement("div", {
     className: "modal-head gd-z"
-  }, /*#__PURE__*/React.createElement("h2", null, game.name, game.displayType === "crt" && " 📺"),
+  }, /*#__PURE__*/React.createElement("h2", null, game.name, legacyDisp(game) === "crt" && " 📺"),
     /*#__PURE__*/React.createElement("div", { className: "head-acts" },
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onEdit, title: "تعديل / حذف" }, "✏️"),
       /*#__PURE__*/React.createElement("button", { className: "icon-btn", onClick: onClose, title: "إغلاق" }, "✕"))), /*#__PURE__*/React.createElement("div", {
@@ -4312,8 +4324,8 @@ function GameDetail({
     className: "card-meta"
   }, /*#__PURE__*/React.createElement(PlatformBadge, {
     platform: game.platform,
-    hardware: game.hardware,
-    emuDevice: game.emuDevice
+    hardware: legacyHw(game),
+    emuDevice: legacyEmuDev(game)
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       color: STATUSES[game.status].color,
@@ -6548,10 +6560,10 @@ function AchievementsView({
   tab === "racheevos" && (() => {
     const raAll = games.filter(g => raShows(g) && raAchList(g).length);
     const raPlats = [...new Set(raAll.map(g => g.platform))].sort();
-    const raDevs = [...new Set(raAll.map(g => g.emuDevice || "pc"))];
+    const raDevs = [...new Set(raAll.map(legacyEmuDev))];
     const raGamesList = raAll
       .filter(g => ragPlat === "all" || g.platform === ragPlat)
-      .filter(g => ragDev === "all" || (g.emuDevice || "pc") === ragDev)
+      .filter(g => ragDev === "all" || legacyEmuDev(g) === ragDev)
       .map(g => {
         const list = g.ra.achievements || [];
         const earned = list.filter(a => a.earned);
@@ -8275,7 +8287,7 @@ function App() {
   const raPullAll = useCallback(async () => {
     const u = raUserRef.current, k = raKeyRef.current;
     if (!u || !k) { setRaBulk({ state: "error", i: 0, total: 0, err: "أضف اسم المستخدم والمفتاح أولًا" }); return; }
-    const emus = gamesRef.current.filter(g => g && g.hardware === "emulator" && !isShell(g));
+    const emus = gamesRef.current.filter(g => g && legacyHw(g) === "emulator" && !isShell(g));
     if (!emus.length) { setRaBulk({ state: "done", i: 0, total: 0, err: "", none: true }); return; }
     setRaBulk({ state: "running", i: 0, total: emus.length, linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0, err: "" });
     const tally = { linked: 0, updated: 0, nomatch: 0, unsupported: 0, failed: 0 };
@@ -9070,9 +9082,9 @@ function App() {
       if (fStatus !== "all" && g.status !== fStatus) return false;
       if (fType !== "all" && g.type !== fType) return false;
       if (!inScope(g, scope)) return false;
-      if (fHardware !== "all" && g.hardware !== fHardware) return false;
-      if (fEmuDev !== "all" && (g.emuDevice || "pc") !== fEmuDev) return false;
-      if (fCrt && g.displayType !== "crt") return false;
+      if (fHardware !== "all" && legacyHw(g) !== fHardware) return false;
+      if (fEmuDev !== "all" && legacyEmuDev(g) !== fEmuDev) return false;
+      if (fCrt && legacyDisp(g) !== "crt") return false;
       if (q && !(g.name.toLowerCase().includes(q) || (g.developer || "").toLowerCase().includes(q) || (g.genre || "").toLowerCase().includes(q) || (g.group || "").toLowerCase().includes(q) || (kidsMap[g.id] || []).some(k => k.name.toLowerCase().includes(q)))) return false;
       return true;
     });
@@ -9483,8 +9495,8 @@ function App() {
     onSaveRaCreds: saveRaCreds,
     raBulk: raBulk,
     onRaPullAll: raPullAll,
-    raLinkedCount: games.filter(g => g.raGameId && g.hardware === "emulator").length,
-    raEmuCount: games.filter(g => g.hardware === "emulator" && !isShell(g)).length,
+    raLinkedCount: games.filter(g => g.raGameId && legacyHw(g) === "emulator").length,
+    raEmuCount: games.filter(g => legacyHw(g) === "emulator" && !isShell(g)).length,
     bulk: bulk,
     onBulkEnrich: bulkEnrich,
     ttbBulk: ttbBulk,
