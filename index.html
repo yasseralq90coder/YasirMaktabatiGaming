@@ -5947,7 +5947,7 @@ function AchievementsView({
           "وأن تعود لواحدة منها وتختمها يعطي مِرانًا مضاعفًا."),
         E("div", { className: "shelf-list" }, pend.slice(0, 12).map(g => {
           const t = ghostTag(g);
-          return E("button", { key: g.id, className: "shelf-row", onClick: () => onOpenGame(g.id) },
+          return E("button", { key: g.id, className: "shelf-item", onClick: () => onOpenGame(g.id) },
             E("div", { className: "sr-i" },
               E("b", null, g.name),
               E("small", null, t ? t.icon + " " + t.name : "لم تُختَم بعد")),
@@ -10334,19 +10334,23 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .trial .tr-top b{ font-family:var(--num); font-size:12px; color:#f5b942; flex:none; }
 .trial .tr-n{ font-size:10px; color:var(--txt-4); }
 
-/* الرفّ */
+/* رتبة الرفّ — قائمة عمودية. ⚠️ اسمها كان shelf-row وهو اسم مأخوذ أصلًا لرفوف
+   المكتبة (شبكة أفقية بأعمدة 158px وتمرير). القاعدة الأدنى كانت تفوز فتحوّل
+   الرفّ إلى flex، فتتقاسم ثماني بطاقات عرض الشاشة وينهار النص إلى حرف في كل
+   سطر — خطأ ٥ بعينه. افحص أن الاسم غير مستعمل قبل أن تصف به شيئًا.
+   ⚠️⚠️ ولا تكتب علامة اقتباس مائلة في تعليقات CSS: كل هذا داخل قالب JS */
 .shelf-list{ display:flex; flex-direction:column; gap:6px; }
-.shelf-row{
+.shelf-item{
   display:flex; align-items:center; gap:11px; width:100%; text-align:start;
   padding:11px 13px; border-radius:var(--r2); border:1px solid var(--line);
   background:var(--s1); color:var(--txt-1); cursor:pointer; font-family:inherit;
   transition:border-color .15s var(--ease), background .15s var(--ease);
 }
-.shelf-row:hover{ border-color:rgba(34,211,238,.4); background:rgba(34,211,238,.06); }
-.shelf-row .sr-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-.shelf-row .sr-i b{ font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.shelf-row .sr-i small{ font-size:10.5px; color:var(--txt-4); }
-.shelf-row .sr-h{ flex:none; font-family:var(--num); font-size:12.5px; font-weight:800; color:#22d3ee; }
+.shelf-item:hover{ border-color:rgba(34,211,238,.4); background:rgba(34,211,238,.06); }
+.shelf-item .sr-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.shelf-item .sr-i b{ font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shelf-item .sr-i small{ font-size:10.5px; color:var(--txt-4); }
+.shelf-item .sr-h{ flex:none; font-family:var(--num); font-size:12.5px; font-weight:800; color:#22d3ee; }
 /* ===== نظام المِران: وسام اللعبة ووسم السَّحب =====
    ⚠️ لا تستخدم .track لأي حاوية هنا — هي flex صف وتسحق الأعمدة (خطأ ٥). */
 .card-medal{
