@@ -404,14 +404,6 @@ const realGames = list => (list || []).filter(g => !g.shell);
    غير مملوكة، فلا يُشتقّ أحدهما من الآخر أبدًا. */
 const OWNED_TYPES = ["physical", "digital"];
 const isOwned = g => !!g && OWNED_TYPES.indexOf(g.type) >= 0;
-/* نقاط اقتناء اللعبة. **الملكية هي ما تُكافَأ**: نسخة ملموسة أعلى من شراءٍ من
-   المتجر، وما لا تملكه (محمّلة أو باشتراك) يعطي نقطة رمزية واحدة. قبلها كانت
-   المحمّلة تعطي 5 كالمشتراة تمامًا، فلم يكن الرقم يفرّق بين ما تملكه وما لا
-   تملكه أصلًا. وغلاف المجموعة منتَج لا لعبة فلا اقتناء له.
-   ⚠️ كان هذا المنطق مكرَّرًا حرفيًا في `baseXp` وفي شاشة «📈 مصادر نقاط الخبرة»
-   فأي تعديل كان يجب أن يطال الموضعين — خطأ ١٥ بعينه. صار دالة واحدة. */
-const ACQ_XP = { physical: 10, digital: 7, downloaded: 1, subscription: 1 };
-const acqXp = g => (!g || isShell(g)) ? 0 : (ACQ_XP[g.type] != null ? ACQ_XP[g.type] : 1);
 /* ⚠️ `hardware` و`emuDevice` و`displayType` **بيانات موروثة لا تُقرأ في التطبيق**.
    كانت 18 مقارنة حرفية منتشرة عليها، فمرّت مرحلةً بثلاثة موصِّلات ثم زالت كلها
    حين صارت كل الأسئلة تُوجَّه إلى الجلسات. القارئ الوحيد الباقي هو `legacySetup`
@@ -1323,9 +1315,6 @@ function keyLabel(key) {
   };
 }
 
-/* ---------- المستويات (XP) ---------- */
-// مصادر النقاط: 1/5/10 لكل لعبة حسب نوعها + 10 لكل ساعة لعب حقيقية (تُستثنى التعويضية) + 100 لأول تختيمة و150 لكل إضافية + نقاط رتب الألعاب اللانهائية.
-const XP_PER_HOUR = 10;
 // ساعات اللعب الحقيقية = مجموع الجلسات ما عدا التعويضية (backfill)
 function realPlayHours(g) {
   return (g.sessions || []).reduce((t, s) => t + (s && s.src !== "backfill" ? Math.max(0, Number(s.ms) || 0) : 0), 0) / 3600000;
@@ -1581,7 +1570,11 @@ function miranOfGame(g) {
 }
 const miranGames = games => (games || []).reduce((t, g) => t + miranOfGame(g), 0);
 const MIRAN_TITLE_PTS = 1000;
-const miranTotal = games => miranGames(games) + earnedTitles(games).length * MIRAN_TITLE_PTS;
+/* رصيد المِران = الألعاب + الألقاب + الانتظام (التحديات والسلسلة). الانتظام
+   محور مستقل: مِران الألعاب يقيس الكمّ ولا يفرّق بين مئة ساعة في أسبوع ومئة
+   على سنة. ⚠️ مسار الموسم ليس هنا عمدًا — هو عرضٌ لنشاط الربع لا رصيد ثانٍ. */
+const miranTotal = games => miranGames(games) + earnedTitles(games).length * MIRAN_TITLE_PTS
+  + challengeMiran(games) + streakMiran(games);
 
 /* ---------- سُلَّم لا نهائي مسمّى ----------
    يبني على rankOn ويكمل بنجوم بعد آخر رتبة مسمّاة، فلا يقف التقدّم أبدًا. */
@@ -1839,27 +1832,6 @@ function trialsOf(games) {
   };
 }
 
-function baseXp(games) {
-  let xp = 0;
-  for (const g of (games || [])) {
-    // نقاط وجود اللعبة حسب النوع: محاكي/NSO = 1، رقمية = 5، ديسك = 10
-    // غلاف المجموعة منتَج لا لعبة → لا نقاط اقتناء له (ألعابه الداخلية تُحتسب)
-    xp += acqXp(g);
-    /* ساعات موزونة بدورتها: العودة للعبة ختمتها تعطي أكثر — وهذا هو السبب
-       الذي يجعلك تعود. ⚠️ مكرَّر في شاشة «مصادر نقاط الخبرة». */
-    xp += XP_PER_HOUR * Math.max(0, cycleXpHours(g));
-    xp += raGamePoints(g); // نقاط إنجازات RA (0 لغير المرتبطة) — ⚠️ مكرَّر في شاشة «مصادر نقاط الخبرة»
-    const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
-    runs.forEach((r, i) => {
-      const base = i === 0 ? 100 : 150; // أساس التختيمة
-      const L = Math.max(0, Number(r.hours) || 0); // طول التختيمة بالساعات
-      // ≤ 5 ساعات: بلا زيادة. أطول: نسبة تصاعدية 1x→5x تبلغ ذروتها عند 300 ساعة، بسقف 500 للختمة
-      const factor = L <= 5 ? 1 : 1 + 4 * (Math.min(L, 300) - 5) / 295;
-      xp += Math.min(500, Math.round(base * factor));
-    });
-  }
-  return xp > 0 ? xp : 0;
-}
 /* ---------- رتب الألعاب اللانهائية (لكل لعبة على حدة) ----------
    عتبات التختيم: 1، 2، 4، 6، 8، 10 ثم +5 لكل رتبة (15، 20، 25…) بلا نهاية.
    نقاط الرتبة رقم k = 25×k وتُحسب ضمن نقاط الخبرة (المستوى). */
@@ -1925,10 +1897,14 @@ function playStreakOf(games) {
 const SEASON_CHARS = [[/metal gear/i, "سوليد سنيك", "🐍"], [/sonic/i, "سونيك", "💨"], [/shinobi/i, "جو موساشي", "🥷"], [/zelda/i, "لينك", "🗡️"], [/mario/i, "ماريو", "🍄"], [/donkey kong/i, "دونكي كونغ", "🍌"], [/final fantasy vii/i, "كلاود", "☁️"], [/crash/i, "كراش", "🌀"], [/splinter cell/i, "سام فيشر", "🕶️"], [/spider-man/i, "سبايدرمان", "🕷️"], [/death stranding/i, "سام بورتر", "📦"], [/bayonetta/i, "بايونيتا", "🌙"], [/metroid/i, "ساموس", "🚀"], [/doom/i, "دووم سلاير", "💀"], [/prince of persia/i, "أمير بلاد فارس", "⏳"], [/red dead/i, "جون مارستون", "🤠"], [/bioshock/i, "بوكر ديويت", "🔱"], [/cuphead/i, "كب هيد", "☕"], [/assassin/i, "الأساسن", "🪓"], [/astro bot/i, "أسترو", "🤖"]];
 const SEASON_STEP = 150, SEASON_TIERS = 10;
 const SEASON_REWARDS = ch => ["🎖️ شارة موسم " + ch, "🥉 وسام " + ch + " البرونزي", "🎨 لقب: تلميذ " + ch, "🥈 وسام " + ch + " الفضي", "🧩 درع الموسم", "🥇 وسام " + ch + " الذهبي", "🔥 لقب: رفيق " + ch, "💎 وسام " + ch + " البلاتيني", "🌟 هالة الموسم", "👑 لقب: خليفة " + ch];
-function seasonXp(games, start, end) {
+/* مِران الربع الحالي. **عرضٌ لا رصيد**: مسار الموسم يقيس نشاطك في الربع بنفس
+   عملة المِران ولا يضيف إلى رصيدك — وإلا دُفع مرّتين عن الساعة الواحدة
+   (خطأ ١٤). التحديات والسلسلة وحدهما تضيفان، لأنهما تقيسان الانتظام لا
+   الكمّ، وهو محور لا يقيسه مِران الألعاب أصلًا. */
+function seasonMiran(games, start, end) {
   const s0 = +start, e0 = +end; let xp = 0;
   for (const g of (games || [])) {
-    (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill") { const t = Date.parse(sx.at) || 0; if (t >= s0 && t < e0) xp += XP_PER_HOUR * (Number(sx.ms) || 0) / 3600000; } });
+    (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill") { const t = Date.parse(sx.at) || 0; if (t >= s0 && t < e0) xp += MIRAN_PER_HOUR * (Number(sx.ms) || 0) / 3600000; } });
     [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])].forEach((r, i) => { const t = Date.parse(String(r.date).slice(0, 10) + "T12:00:00") || 0; if (t >= s0 && t < e0) { const base = i === 0 ? 100 : 150, L = Math.max(0, Number(r.hours) || 0), factor = L <= 5 ? 1 : 1 + 4 * (Math.min(L, 300) - 5) / 295; xp += Math.min(500, Math.round(base * factor)); } });
   }
   return Math.round(xp);
@@ -1939,7 +1915,7 @@ function seasonInfo(games) {
   const pool = SEASON_CHARS.filter(([re]) => (games || []).some(g => re.test(g.name)));
   const list = pool.length ? pool : SEASON_CHARS;
   const [, char, icon] = list[(y * 4 + q) % list.length];
-  const xp = seasonXp(games, start, end);
+  const xp = seasonMiran(games, start, end);
   const tier = Math.min(SEASON_TIERS, Math.floor(xp / SEASON_STEP));
   return { char, icon, name: "موسم " + char, start, end, xp, tier, q: q + 1, y, rewards: SEASON_REWARDS(char), daysLeft: Math.max(0, Math.ceil((end - now) / 86400000)), pct: Math.min(100, (xp % SEASON_STEP) / SEASON_STEP * 100) };
 }
@@ -1987,7 +1963,9 @@ function weeklyChallenges(games, ws) {
     return { ...c, cur: Math.min(cur, c.tg), raw: cur, done: cur >= c.tg, pct: Math.min(100, cur / c.tg * 100) };
   });
 }
-function challengeXp(games) {
+/* تحديات الأسبوع تكافئ **الانتظام** لا الكمّ — محورٌ لا يقيسه مِران الألعاب،
+   فتضيف رصيدًا حقيقيًا لا عرضًا. */
+function challengeMiran(games) {
   let first = Infinity;
   for (const g of (games || [])) for (const s of (g.sessions || [])) if (s && s.src !== "backfill") { const t = Date.parse(s.at) || 0; if (t && t < first) first = t; }
   if (!isFinite(first)) return 0;
@@ -1995,8 +1973,8 @@ function challengeXp(games) {
   for (let ws = weekStartOf(first); ws <= cw; ws += 7 * 86400000) for (const c of weeklyChallenges(games, ws)) if (c.done) xp += c.xp;
   return xp;
 }
-/* ---------- سلسلة اللهب 🔥: مكافأة XP للأيام المتتالية (جسر يوم واحد لكل سلسلة رحمةً) ---------- */
-function streakXp(games) {
+/* ---------- سلسلة اللهب 🔥: مِران للأيام المتتالية (جسر يوم واحد لكل سلسلة رحمةً) ---------- */
+function streakMiran(games) {
   const days = new Set();
   for (const g of (games || [])) for (const sx of (g.sessions || [])) if (sx && sx.src !== "backfill" && sx.at) days.add(localDay(sx.at));
   const arr = [...days].sort(); let xp = 0, run = 1, bridged = false;
@@ -2027,15 +2005,6 @@ function LevelUpFx({ entry, onDone }) {
       entry.game && /*#__PURE__*/React.createElement("div", { className: "lvlfx-sub" }, "بطل المرحلة: " + entry.game + " (" + fmtHours(entry.hours) + ")"),
       /*#__PURE__*/React.createElement("div", { className: "lvlfx-tap" }, "اضغط للمتابعة")));
 }
-function gameRankInfo(count) {
-  let c = 0;
-  while (count >= GAME_TIER_AT(c)) c++;
-  return { cleared: c, pts: 25 * c * (c + 1) / 2, name: c ? grankName(c - 1) : "", next: GAME_TIER_AT(c), nextName: grankName(c) };
-}
-const gameRanksAll = games => (games || []).map(g => ({ g, count: runsCountOf(g), info: gameRankInfo(runsCountOf(g)) })).filter(x => x.count > 0).sort((a, b) => b.count - a.count || a.g.name.localeCompare(b.g.name));
-const gameRankPoints = games => gameRanksAll(games).reduce((s, x) => s + x.info.pts, 0);
-// نقاط الخبرة الكلية = الأساس + نقاط رتب الألعاب (تُحسب في المستوى)
-const totalXp = games => Math.round(baseXp(games) + gameRankPoints(games) + challengeXp(games) + streakXp(games));
 /* ---------- سلسلة الأيام والمجموعات وتحدي الشهر ---------- */
 const realDayHours = games => { const m = {}; (games||[]).forEach(g => (g.sessions||[]).forEach(s => { if (s && s.src !== "backfill" && s.at) { const k = localDay(s.at); m[k] = (m[k]||0) + s.ms/3600000; } })); return m; };
 const curStreak = games => { const m = realDayHours(games); const t = new Date();
@@ -2096,45 +2065,6 @@ function monthChallenge(games) {
   const c = CHALLS[now.getMonth() % CHALLS.length];
   return { title: c.t, done: c.chk(games||[], inM), month: AR_MONTHS[now.getMonth()] };
 }
-const costFor = lvl => Math.round(120 * Math.pow(lvl, 1.4));
-function levelInfo(xp) {
-  let lvl = 1,
-    acc = 0;
-  while (acc + costFor(lvl) <= xp && lvl < 100000) {
-    acc += costFor(lvl);
-    lvl++;
-  }
-  const into = xp - acc,
-    need = costFor(lvl);
-  return {
-    level: lvl,
-    into,
-    need,
-    pct: Math.min(100, into / need * 100)
-  };
-}
-const RANKS = [[1, "مُبتدئ", "🌱"], [3, "مُستكشف الرفوف", "🧭"], [5, "لاعب", "🎯"], [7, "صائد الجواهر", "💠"], [10, "هاوٍ متمرّس", "⚔️"], [13, "مُغامر الليالي", "🌙"], [16, "محترف", "🔥"], [20, "صائد التروفيات", "🏆"], [24, "خبير", "💎"], [29, "سيّد المكتبة", "📚"], [34, "أسطورة", "👑"], [40, "أسطورة الرفوف", "🗄️"], [46, "جامع خرافي", "🌟"], [60, "حارس الكلاسيكيات", "🏛️"], [80, "إمبراطور الألعاب", "🐉"], [100, "خالد الذكر", "☄️"]];
-const prestigeOf = lvl => lvl >= 200 ? 4 : lvl >= 100 ? 3 : lvl >= 50 ? 2 : lvl >= 25 ? 1 : 0;
-const prestigeStars = lvl => "⭐".repeat(prestigeOf(lvl));
-const rankOf = lvl => {
-  let r = RANKS[0];
-  for (const x of RANKS) if (lvl >= x[0]) r = x;
-  return r;
-};
-// نظام رتب اللعب (منفصل عن رتب التجميع): يعتمد على النشاط الفعلي — إجمالي ساعات اللعب + التختيمات
-const GAME_RANKS = [[0, "مُستكشف", "🎮"], [50, "مُقاتل", "🕹️"], [150, "مُحنّك", "🎯"], [350, "بطل", "🔥"], [700, "نخبة", "🗡️"], [1300, "أسطوري", "⚡"], [2200, "جبّار", "👑"], [3500, "خارق", "🌌"]];
-function gameScore(games) {
-  let h = 0, c = 0;
-  for (const g of (games || [])) {
-    /* ساعات حقيقية فقط (realPlayHours) لا حقل hours الخام: الأخير يضمّ الوقت
-       التعويضي backfill الذي يستثنيه XP وكل الإحصائيات، فكانت رتبة اللعب
-       ترتفع بوقت لا يظهر في أي مكان آخر — لعبة بساعة مسجّلة و39 مكتوبة
-       يدويًا كانت تعطي 40 نقطة لعب و10 نقاط خبرة. */
-    h += Math.max(0, realPlayHours(g));
-    c += [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])].length;
-  }
-  return Math.round(h + 20 * c); // ساعة = 1 نقطة لعب، تختيمة = 20
-}
 /* سُلَّم رتب واحد يخدم كل الرتب المستقلّة (اللعب، الأركيد، عالما الأجهزة).
    كان هذا المنطق منسوخًا حرفيًا في دالتين، وكل رتبة جديدة كانت ستنسخه ثالثة
    ورابعة — وهو بالضبط ما تحذّر منه القاعدة الذهبية 5. */
@@ -2146,7 +2076,6 @@ function rankOn(ladder, score) {
   const into = s - cur[0], need = next ? next[0] - cur[0] : 0;
   return { score: s, name: cur[1], icon: cur[2], tier: idx + 1, next: next ? next[1] : null, nextAt: next ? next[0] : null, pct: next ? Math.min(100, into / need * 100) : 100 };
 }
-const gameRankOf = games => rankOn(GAME_RANKS, gameScore(games));
 // رتبة الأركيد المستقلة — تعتمد على إجمالي تختيمات الأركيد التلقائية عبر كل ألعابك
 const ARCADE_RANKS = [[0, "لاعب أركيد مبتدئ", "🕹️"], [3, "صياد العملات", "🪙"], [8, "قناص النقاط", "🎯"], [15, "سريع الأصابع", "⚡"], [25, "أسطورة الصالة", "🔥"], [40, "ملك الأركيد", "👑"]];
 function arcadeScore(games) {
@@ -5391,11 +5320,6 @@ function GuideModal({ onClose }) {
 
       S("📈 كيف يُحسب المستوى؟", p("تكلفة كل مستوى = 120 × (رقم المستوى)^1.4 نقطة. أي أن المستويات الأولى سريعة ثم تزداد صعوبة تدريجيًا بلا سقف نهائي. عند الترقّي تظهر لك احتفالية بقصاصات ملوّنة واهتزاز.")),
 
-      S("👑 رتب الجامع (حسب المستوى)", li(RANKS.map(r => r[2] + " " + r[1] + " — من المستوى " + r[0]))),
-
-      S("🕹️ رتب اللعب (حسب النشاط)", /*#__PURE__*/React.createElement(React.Fragment, null,
-        p("نقاط اللعب = كل ساعة لعب نقطة + كل تختيمة 20 نقطة."),
-        li(GAME_RANKS.map(r => r[2] + " " + r[1] + " — من " + r[0] + " نقطة")))),
 
       S("🎖️ رتب الألعاب اللانهائية (لكل لعبة)", li([
         "كل لعبة في مكتبتك لها سلسلة رتب خاصة بها تعتمد على عدد تختيماتك لها.",
@@ -5466,7 +5390,7 @@ function GuideModal({ onClose }) {
 }
 
 /* 🪪 بطاقة اللاعب: تُرسم على كانفس وتُصدَّر كصورة */
-function drawGamercard(games, lvl) {
+function drawGamercard(games) {
   const cv = document.createElement("canvas");
   const W = 1000, H = 560;
   cv.width = W; cv.height = H;
@@ -5477,7 +5401,6 @@ function drawGamercard(games, lvl) {
   x.fillStyle = grd; x.fillRect(0, 0, W, H);
   x.strokeStyle = "#f5b94266"; x.lineWidth = 4;
   if (x.roundRect) { x.beginPath(); x.roundRect(10, 10, W - 20, H - 20, 26); x.stroke(); }
-  const rk = rankOf(lvl.level), gr = gameRankOf(games);
   const hrs = games.reduce((t, g) => t + (Number(g.hours) || 0), 0);
   const comps = games.reduce((t, g) => t + runsCountOf(g), 0);
   const plats = games.filter(g => platinumOf(g)).length;
@@ -5628,7 +5551,7 @@ function buildJourney(games, levelLog) {
   le.forEach(e => { if (!e || !e.at) return;
     const g = games.find(x => x.name === e.game);
     ev.push({ t: +new Date(e.at), kind: "level", gid: g ? g.id : null, ic: "⚡", big: e.level % 5 === 0,
-      title: "وصلت المستوى " + e.level, sub: e.game ? "أكثر لعبة في هذه المرحلة: " + e.game : "" });
+      title: "بلغت رتبة " + miranTierName(e.level).name, sub: e.game ? "أكثر لعبة في هذه المرحلة: " + e.game : "" });
   });
 
   // دفعات الإضافة
@@ -5855,7 +5778,6 @@ function AchievementsView({
   games,
   covers,
   ach,
-  lvl,
   xp,
   levelLog,
   levelUp,
@@ -5878,7 +5800,6 @@ function AchievementsView({
   const total = realGames(games).length;
   const done = games.filter(g => g.status === "completed").length;
   const hours = Math.round(totalRealHours(games));
-  const rank = rankOf(lvl.level);
   const byFamily = useMemo(() => {
     const m = {};
     for (const g of games) {
@@ -6211,7 +6132,7 @@ function AchievementsView({
       /*#__PURE__*/React.createElement("div", { className: "chall-row-t" }, t, /*#__PURE__*/React.createElement("span", null, v >= tgt ? "✅" : Math.min(v, tgt) + " / " + tgt)),
       /*#__PURE__*/React.createElement("div", { className: "next-bar" }, /*#__PURE__*/React.createElement("div", { className: "next-fill", style: { width: Math.min(100, Math.round(v / tgt * 100)) + "%" } })))));
   })()), tab === "card" && /*#__PURE__*/React.createElement("div", { className: "gcard-wrap" },
-    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { const d = drawGamercard(games, lvl); if (d) setGcard(d); } }, "🪪 إنشاء بطاقة اللاعب"),
+    /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { const d = drawGamercard(games); if (d) setGcard(d); } }, "🪪 إنشاء بطاقة اللاعب"),
     gcard && /*#__PURE__*/React.createElement("div", { className: "gcard-out" },
       /*#__PURE__*/React.createElement("img", { src: gcard, alt: "بطاقة اللاعب", className: "gcard-img" }),
       /*#__PURE__*/React.createElement("a", { className: "btn primary", href: gcard, download: "gamercard.png" }, "⬇️ حفظ الصورة"),
@@ -6307,12 +6228,12 @@ function AchievementsView({
         /*#__PURE__*/React.createElement("div", { className: "sn-tt" },
           /*#__PURE__*/React.createElement("b", null, sn.name),
           /*#__PURE__*/React.createElement("span", null, "الربع ", sn.q, " • ", sn.y, " — ⏳ باقي ", sn.daysLeft, " يوم")),
-        /*#__PURE__*/React.createElement("div", { className: "sn-xp" }, /*#__PURE__*/React.createElement("b", null, sn.xp), /*#__PURE__*/React.createElement("span", null, "XP الموسم"))),
+        /*#__PURE__*/React.createElement("div", { className: "sn-xp" }, /*#__PURE__*/React.createElement("b", null, sn.xp), /*#__PURE__*/React.createElement("span", null, "مِران الموسم"))),
       /*#__PURE__*/React.createElement("div", { className: "sn-track" }, [...Array(SEASON_TIERS)].map((_, i) => /*#__PURE__*/React.createElement("div", {
         key: i, className: "sn-dot" + (i < sn.tier ? " on" : ""), title: sn.rewards[i]
       }, i < sn.tier ? "✓" : i + 1))),
       /*#__PURE__*/React.createElement("div", { className: "next-bar", style: { marginTop: 8 } }, /*#__PURE__*/React.createElement("div", { className: "next-fill", style: { width: (sn.tier >= SEASON_TIERS ? 100 : sn.pct) + "%" } })),
-      /*#__PURE__*/React.createElement("div", { className: "sn-sub" }, sn.tier >= SEASON_TIERS ? "👑 أتممت مسار الموسم كاملًا!" : "المكافأة القادمة: " + sn.rewards[sn.tier] + " — تبقّى " + (SEASON_STEP * (sn.tier + 1) - sn.xp) + " XP"),
+      /*#__PURE__*/React.createElement("div", { className: "sn-sub" }, sn.tier >= SEASON_TIERS ? "👑 أتممت مسار الموسم كاملًا!" : "المكافأة القادمة: " + sn.rewards[sn.tier] + " — تبقّى " + (SEASON_STEP * (sn.tier + 1) - sn.xp) + " مِران"),
       sn.tier > 0 && /*#__PURE__*/React.createElement("div", { className: "sn-got" }, "🎁 مكافآتك: ", sn.rewards.slice(0, sn.tier).join(" • ")));
   })(), tab === "miran" && (() => {
     const ws = weekStartOf(Date.now());
@@ -6323,7 +6244,7 @@ function AchievementsView({
       chs.map(c => /*#__PURE__*/React.createElement("div", { key: c.id, className: "ch-row" + (c.done ? " done" : "") },
         /*#__PURE__*/React.createElement("div", { className: "ch-top" },
           /*#__PURE__*/React.createElement("span", { className: "ch-t" }, c.done ? "✅ " : "◻️ ", c.t),
-          /*#__PURE__*/React.createElement("span", { className: "ch-xp" }, "+", c.xp, " XP")),
+          /*#__PURE__*/React.createElement("span", { className: "ch-xp" }, "+", c.xp, " مِران")),
         /*#__PURE__*/React.createElement("div", { className: "next-bar" }, /*#__PURE__*/React.createElement("div", { className: "next-fill", style: { width: c.pct + "%" } })),
         /*#__PURE__*/React.createElement("div", { className: "ch-sub" }, c.cur, " / ", c.tg, " ", c.u))),
       /*#__PURE__*/React.createElement("div", { className: "ch-note" }, "تتجدد كل إثنين — وتُحتسب تلقائيًا من لعبك، حتى لأسابيع الماضي."),
@@ -6331,7 +6252,7 @@ function AchievementsView({
         /*#__PURE__*/React.createElement("span", { className: "streak-fire" + (stk.cur > 0 ? " lit" : "") }, "🔥"),
         /*#__PURE__*/React.createElement("div", { className: "sn-tt" },
           /*#__PURE__*/React.createElement("b", null, stk.cur > 0 ? "سلسلة " + stk.cur + " " + (stk.cur > 10 ? "يومًا" : stk.cur > 2 ? "أيام" : stk.cur === 2 ? "يومين" : "يوم") : "لا توجد سلسلة نشطة"),
-          /*#__PURE__*/React.createElement("span", null, "🏅 أفضل سلسلة: ", stk.best, " • كل يوم متتالٍ +10 XP وكل 7 أيام +50 XP (مع رحمة تخطّي يوم واحد)"))));
+          /*#__PURE__*/React.createElement("span", null, "🏅 أفضل سلسلة: ", stk.best, " • كل يوم متتالٍ +10 مِران وكل 7 أيام +50 مِران (مع رحمة تخطّي يوم واحد)"))));
   })(), tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "level-card chwk-card",
     style: { marginTop: 14 }
@@ -7013,7 +6934,7 @@ function AnnualCertModal({ games, covers, years, year, setYear, onClose }){
   );
 }
 function InsightsView({
-  games, covers, ach, lvl, xp }) {
+  games, covers, ach }) {
   const [period, setPeriod] = useState("month");
   const [cf, setCf] = useState("");
   const [ct, setCt] = useState("");
@@ -7100,7 +7021,6 @@ function InsightsView({
     const sum=bars.reduce((t,b)=>t+b.v, 0);
     return { bars, max, mode, sum };
   }, [games, period, range.start, range.end]);
-  const rank = rankOf(lvl.level);
   const headHours = scoped ? d.periodHours : d.totH;
   const Stat = (ic,v,l,c) => E("div",{className:"kpi"}, E("span",{className:"kpi-ic"},ic), E("b",{className:"kpi-val",style:{color:c}},v), E("span",{className:"kpi-lbl"},l));
   return E("div",{className:"dash"},
@@ -7108,10 +7028,7 @@ function InsightsView({
     period==="custom" && E("div",{className:"period-custom"},
       E("label",null,E("span",null,"من"),E("input",{type:"date",value:cf,onChange:e=>setCf(e.target.value)})),
       E("label",null,E("span",null,"إلى"),E("input",{type:"date",value:ct,onChange:e=>setCt(e.target.value)}))),
-    E("div",{className:"level-card dash-hero"}, E("div",{className:"rank-emoji"},rank[2]), E("div",{className:"level-info"},
-      E("div",{className:"rank-name"},rank[1]), E("div",{className:"level-num"},"المستوى ",lvl.level),
-      E("div",{className:"xp-bar"},E("div",{className:"xp-fill",style:{width:lvl.pct+"%"}})),
-      E("div",{className:"xp-text"},lvl.into," / ",lvl.need," نقطة للمستوى التالي • ",xp," XP إجمالي"))),
+    
     (()=>{ const dm=realDayHours(games); const end=new Date(); end.setHours(12,0,0,0); const start=new Date(end.getTime()-364*86400000); start.setDate(start.getDate()-start.getDay()); start.setHours(12,0,0,0);
       const cells=[]; for(let t=start.getTime(); t<=end.getTime()+1; t+=86400000){ const k=localDay(new Date(t)); cells.push({k,v:dm[k]||0}); }
       const lv=v=>v<=0?0:v<1?1:v<2?2:v<4?3:4;
@@ -7216,56 +7133,7 @@ function InsightsView({
       E("div", { className: "chall-k" }, "حسب وقت اليوم"), bars(hb, HL),
       E("div", { className: "chall-k", style: { marginTop: 10 } }, "حسب يوم الأسبوع"), bars(wb, WL));
   })(),
-  /* 📈 سجل الخبرة */
-  E("div", { className: "section-title" }, "📈 مصادر نقاط الخبرة"),
-  (() => {
-    let exist = 0, hxp = 0, cxp = 0, rxp = 0, axp = 0;
-    const mmap = {};
-    games.forEach(g => {
-      exist += acqXp(g);
-      /* ⚠️ يطابق سطر baseXp: الساعات موزونة بمضاعف دورتها لا خامًا */
-      { const mult = {}; cycleHours(g).forEach(x => { mult[x.cycle] = 1 + CYCLE_STEP * (x.cycle - 1); });
-        const runsT = ((g.playthroughs || []).map(r => (r && r.date) ? (Date.parse(r.date + "T23:59:59") || 0) : 0).filter(Boolean)).sort((a, b) => a - b);
-        (g.sessions || []).forEach(sx => {
-          if (!sx || sx.src === "backfill" || !sx.at) return;
-          const t = Date.parse(sx.at) || 0; if (!t) return;
-          let done = 0; for (const r of runsT) { if (r <= t) done++; else break; }
-          const m = isEndless(g) ? 1 : (1 + CYCLE_STEP * done);
-          const v = XP_PER_HOUR * (Number(sx.ms) || 0) / 3600000 * m;
-          hxp += v; const mk = localMonth(sx.at); mmap[mk] = (mmap[mk] || 0) + v;
-        }); }
-      const runs = [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])];
-      runs.forEach((r, i) => {
-        const base = i === 0 ? 100 : 150, L = Math.max(0, Number(r.hours) || 0);
-        const factor = L <= 5 ? 1 : 1 + 4 * (Math.min(L, 300) - 5) / 295;
-        const v = Math.min(500, Math.round(base * factor));
-        cxp += v;
-        const mk = localMonth(r.date);
-        if (mk.length === 7) mmap[mk] = (mmap[mk] || 0) + v;
-      });
-      rxp += gameRankInfo(runsCountOf(g)).pts;
-      axp += raGamePoints(g); // ⚠️ يطابق سطر baseXp — أي تعديل يطال الاثنين
-    });
-    /* ⚠️ هذه البنود يجب أن تجمع إلى totalXp(games) بالضبط. أي مصدر جديد في
-       totalXp بلا بند هنا يظهر كفارق غير مفسَّر تحت المستوى. */
-    const chx = challengeXp(games), stx = streakXp(games);
-    const srcs = [["🎮 اقتناء الألعاب", exist, "#a78bfa"], ["⏱ ساعات اللعب", Math.round(hxp), "#22d3ee"], ["🏁 التختيمات", Math.round(cxp), "#f5b942"], ["🏅 رتب الألعاب", Math.round(rxp), "#4ade80"], ["🎖 إنجازات RetroAchievements", Math.round(axp), "#fb7185"], ["🎯 التحديات الأسبوعية", Math.round(chx), "#facc15"], ["🔥 سلسلة الأيام", Math.round(stx), "#fb923c"]].filter(x => x[1] > 0);
-    const tot = Math.max(1, srcs.reduce((t, x) => t + x[1], 0));
-    const months = [];
-    for (let i = 5; i >= 0; i--) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); months.push(localDay(d).slice(0, 7)); }
-    const mx = Math.max(1, ...months.map(m => mmap[m] || 0));
-    const shown = srcs.reduce((t, x) => t + x[1], 0), real = totalXp(games), drift = real - shown;
-    return E("div", { className: "yy-card" },
-      srcs.map(([l, v, c]) => E("div", { className: "xp-src", key: l },
-        E("div", { className: "xp-src-t" }, l, E("b", null, v.toLocaleString("ar"), " نقطة")),
-        E("div", { className: "next-bar" }, E("div", { className: "next-fill", style: { width: Math.round(v / tot * 100) + "%", background: c } })))),
-      E("div", { className: "xp-total" }, "الإجمالي: ", E("b", null, shown.toLocaleString("ar"), " نقطة"),
-        Math.abs(drift) > 1 ? E("span", { className: "xp-drift" }, " (فارق غير مفسَّر: " + Math.round(drift) + ")") : null),
-      E("div", { className: "chall-k", style: { marginTop: 10 } }, "الخبرة المكتسبة آخر ٦ أشهر"),
-      E("div", { className: "dist-bars" }, months.map(m => E("div", { className: "dist-col", key: m, title: Math.round(mmap[m] || 0) + " نقطة" },
-        E("div", { className: "dist-bar" }, E("div", { className: "dist-fill", style: { height: Math.round((mmap[m] || 0) / mx * 100) + "%", background: "#f5b942" } })),
-        E("span", { className: "dist-l" }, m.slice(5))))));
-  })()
+  
   );
 }
 
@@ -8935,10 +8803,8 @@ function App() {
     } : p);
   }, []);
   const ach = useMemo(() => computeAchievements(realGames(games)), [games]);
-  const xp = useMemo(() => totalXp(games), [games]);
-  const lvl = useMemo(() => levelInfo(xp), [xp]);
-  /* رتبة المِران — صارت الرتبة الرئيسية في الشريط العلوي بدل المستوى.
-     النظام القديم (levelInfo/xp) باقٍ في تبويب «📜 الأرشيف» ولم يُحذف. */
+  /* رتبة المِران هي الرتبة الوحيدة. سقط نظام المستوى وXP كليًا: كان يعطيك
+     هويةً ثانية («صائد الجواهر — المستوى 8») تنافس هذه في شاشة أخرى. */
   const mrank = useMemo(() => miranRankOf(realGames(games)), [games]);
   const lastPlayedList = useMemo(() => games.filter(g => g.lastPlayed && !g.arcadeMode).sort((a, b) => String(b.lastPlayed).localeCompare(String(a.lastPlayed))).slice(0, 4), [games]);
   const bestScoreOf = g => Math.max(0, ...(g.playthroughs || []).map(p => Number(p.score) || 0), ...(g.scoreAttempts || []).map(a => Number(a.score) || 0));
@@ -8946,11 +8812,12 @@ function App() {
   const lastG = lastPlayedList[0] || null;
   const __ambient = useCoverColor(lastG ? covers[lastG.id] : null, theme.mode);
   const streak = useMemo(() => curStreak(games), [games]);
+  /* لون اللكنة يتبع درجة المِران بدل رقم المستوى */
+  const mtier = useMemo(() => miranTier(realGames(games)), [games]);
   useEffect(() => {
     const RC = ["#8bc34a", "#4fc3f7", "#cd7f32", "#ff7043", "#7de3ff", "#ffd479", "#ff7ab8"];
-    const i = Math.max(0, RANKS.map(r => r[0] <= lvl.level).lastIndexOf(true));
-    document.documentElement.style.setProperty("--rank", RC[i] || "#f5b942");
-  }, [lvl.level]);
+    document.documentElement.style.setProperty("--rank", RC[Math.max(0, mtier - 1) % RC.length]);
+  }, [mtier]);
   const [levelLog, setLevelLog] = useState([]);
   const [levelUp, setLevelUp] = useState(null);
   // كشف الترقّي: عند بلوغ مستوى جديد، تُسجَّل رسالة تهنئة تذكر أكثر لعبة لُعبت
@@ -8962,14 +8829,22 @@ function App() {
       try { rec = await sget(KEY_LEVELLOG); } catch {}
       /* ترميم لمرّة واحدة: الخطأ القديم كان في الساعات فقط — اسم أكثر لعبة كان يُحسب صحيحًا.
          لذا نُبقي الاسم المسجّل كما هو ونُصحّح ساعاته من الجلسات الحقيقية داخل المرحلة. */
-      if (rec && Array.isArray(rec.entries) && rec.entries.length && !rec.fixedTop) {
+      /* ⚠️ العلامة رقمٌ لا منطق: رفعُها يعيد تشغيل الترميم مرّة واحدة على
+         الأجهزة التي رمّمت بالإصدار السابق. رُفعت إلى 2 لأن الرسائل المخزَّنة
+         كانت تسمّي درجة المِران «مستوى» وتقرأ اسمها من سُلَّم حُذف. */
+      if (rec && Array.isArray(rec.entries) && rec.entries.length && !(rec.fixedTop >= 3)) {
         const gs = gamesRef.current || [];
         const asc = [...rec.entries].sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
         const spanStart = {};
         asc.forEach((e, i) => { spanStart[e.at] = i ? Date.parse(asc[i - 1].at) : 0; });
         rec.entries = rec.entries.map(e => {
           const to = Date.parse(e.at) || 0, from = spanStart[e.at] || 0;
-          if (!to || !e.game) return e;
+          /* ⚠️ إعادة الصياغة تقع دائمًا، والساعات وحدها هي المشروطة. كان
+             الخروج المبكر يترك إدخالات بلا لعبة أو بلا جلسات تحمل النصّ
+             القديم «وصلت المستوى 5 (لاعب 🎯)» — اسمُ سُلَّمٍ حُذف. */
+          const rk = miranTierName(e.level);
+          const head = "🎉 مبروك! بلغت رتبة " + rk.name + " " + rk.icon + ".";
+          if (!to || !e.game) return { ...e, msg: head + " واصل اللعب لتسجيل ساعاتك في المرحلة القادمة!" };
           const want = String(e.game).trim().toLowerCase();
           let mine = 0, ms = 0;
           gs.forEach(g => {
@@ -8983,15 +8858,14 @@ function App() {
               }
             });
           });
-          if (!ms) return e;
+          if (!ms) return { ...e, msg: head + " واصل اللعب لتسجيل ساعاتك في المرحلة القادمة!" };
           const h = Math.round((mine / 3600000) * 10) / 10;
           const hAll = Math.round((ms / 3600000) * 10) / 10;
-          const rk = rankOf(e.level);
           return { ...e, hours: h, hoursAll: hAll,
-            msg: "🎉 مبروك! وصلت المستوى " + e.level + " (" + rk[1] + " " + rk[2] + "). لعبت " +
+            msg: head + " لعبت " +
                  fmtHours(hAll) + " في هذه المرحلة، أكثرها " + String(e.game).trim() + " بـ " + fmtHours(h) + "." };
         });
-        rec.fixedTop = 1;
+        rec.fixedTop = 3;
         try { await sset(KEY_LEVELLOG, rec); } catch (e) {}
       }
       const cur = miranTier(realGames(gamesRef.current || []));
@@ -9016,8 +8890,11 @@ function App() {
         /* ساعات أكثر لعبة وحدها — لا مجموع المرحلة كله */
         const h = topId ? Math.round((per[topId] / 3600000) * 10) / 10 : 0;
         const hAll = Math.round((ms / 3600000) * 10) / 10;
-        const rk = rankOf(cur);
-        const msg = "🎉 مبروك! وصلت المستوى " + cur + " (" + rk[1] + " " + rk[2] + ")." +
+        /* ⚠️ كان يقرأ درجة المِران من سُلَّم المستوى ويسمّيها «مستوى» — سجلّ
+           الترقّي صار يخزّن درجات المِران منذ أن حلّ محلّ المستوى، فالتسمية
+           كانت كاذبة والسُلَّم خاطئًا. miranTierName هو المترجم الصحيح. */
+        const rk = miranTierName(cur);
+        const msg = "🎉 مبروك! بلغت رتبة " + rk.name + " " + rk.icon + "." +
           (top ? " لعبت " + fmtHours(hAll) + " في هذه المرحلة، أكثرها " + top + " بـ " + fmtHours(h) + "."
                : " واصل اللعب لتسجيل ساعاتك في المرحلة القادمة!");
         const entry = { level: cur, at: nowISO(), game: top, hours: h, hoursAll: hAll, msg };
@@ -9031,7 +8908,6 @@ function App() {
       }
     })();
   }, [games, loaded]);
-  const rank = rankOf(lvl.level);
   const [sortBy, setSortBy] = useState("added");
   const [fPlat, setFPlat] = useState("all");
   const kidsMap = useMemo(() => {
@@ -9412,8 +9288,6 @@ function App() {
     games: games,
     covers: covers,
     ach: ach,
-    lvl: lvl,
-    xp: xp,
     levelLog: levelLog,
     levelUp: levelUp,
     onUpdateNote: updateNote,
@@ -9424,8 +9298,6 @@ function App() {
     games: games,
     covers: covers,
     ach: ach,
-    lvl: lvl,
-    xp: xp
   }), view === "backup" && /*#__PURE__*/React.createElement(BackupView, {
     theme: theme,
     onSaveTheme: saveTheme,

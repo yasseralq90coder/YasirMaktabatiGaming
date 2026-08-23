@@ -37,51 +37,50 @@ const game = o => Object.assign({
   type: "digital", status: "playing", hours: 0, sessions: [], playthroughs: []
 }, o);
 
-/* ═══════════ ① نقاط الخبرة والمستوى ═══════════ */
-G("① نقاط الخبرة والمستوى");
-noThrow(() => C.baseXp(null), "baseXp(null) لا ينهار");
-noThrow(() => C.baseXp([{}]), "baseXp على لعبة فارغة لا ينهار");
-eq(C.baseXp([game({ type: "physical" })]), 10, "لعبة فيزيائية = 10 نقاط اقتناء");
-/* نقاط الاقتناء تكافئ **الملكية**: ملموس 10 > شراء من المتجر 7 > ما لا تملكه 1.
-   قبلها كانت المحمّلة تعطي 5 كالمشتراة، فلم يفرّق الرقم بين ما تملكه وما لا. */
-eq(C.baseXp([game({ type: "digital" })]), 7, "شراء من المتجر = 7 نقاط");
-eq(C.baseXp([game({ type: "downloaded" })]), 1, "محمّلة (لا تملكها) = نقطة واحدة");
-eq(C.baseXp([game({ type: "subscription" })]), 1, "اشتراك (لا تملكه) = نقطة واحدة");
-ok(C.acqXp(game({ type: "physical" })) > C.acqXp(game({ type: "digital" }))
-  && C.acqXp(game({ type: "digital" })) > C.acqXp(game({ type: "downloaded" })),
-  "سُلّم الاقتناء: ملموس > متجر > غير مملوكة");
-eq(C.acqXp(game({ type: "wat" })), 1, "نوع غير معروف ⇒ نقطة واحدة لا undefined");
-eq(C.acqXp(null), 0, "acqXp(null) لا ينهار");
-eq(C.baseXp([game({ nso: true, type: "subscription" })]), 1, "لعبة NSO = نقطة واحدة");
-eq(C.baseXp([game({ shell: true, type: "physical" })]), 0, "غلاف المجموعة لا يعطي نقاط اقتناء");
-eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3)] })]), 37,
-  "3 ساعات حقيقية = 30 نقطة + 7 اقتناء");
-eq(C.baseXp([game({ hours: 3, sessions: [sess("2026-01-01", 3, "backfill")] })]), 7,
-  "الوقت التعويضي (backfill) لا يعطي XP");
-ok(C.levelInfo(-50).level === 1, "XP سالب ⇒ المستوى 1");
-ok(C.levelInfo(NaN).level === 1, "XP غير رقمي ⇒ المستوى 1");
-ok(C.levelInfo(0).level === 1 && C.levelInfo(C.costFor(1)).level === 2, "حدّ المستوى الأول صحيح");
-ok(C.baseXp([game({ playthroughs: [{ date: "2026-01-01", hours: 99999, n: 1 }] })]) - 7 <= 500,
-  "التختيمة الواحدة لا تتجاوز سقف 500 نقطة");
+/* ═══════════ ① المِران — العملة الوحيدة ═══════════ */
+G("① المِران — العملة الوحيدة");
+/* سقط نظام المستوى وXP كليًا (baseXp/levelInfo/RANKS/acqXp/gameScore). كان
+   يعطي هويةً ثانية تنافس المِران في شاشة أخرى، ونقاط اقتنائه كانت تكافئ
+   امتلاك اللعبة لا لعبها. ما بقي هنا يحرس المفاهيم التي انتقلت للمِران. */
+noThrow(() => C.miranTotal(null), "miranTotal(null) لا ينهار");
+noThrow(() => C.miranOfGame({}), "miranOfGame على لعبة فارغة لا ينهار");
+eq(C.miranOfGame(game({ type: "physical" })), 0,
+  "الاقتناء صفر — اللعبة غير المُشغَّلة لا تعطي شيئًا مهما كان نوعها");
+eq(C.miranOfGame(game({ shell: true, hours: 10, sessions: [sess("2026-01-01", 10)] })), 0,
+  "غلاف المجموعة منتَج لا لعبة");
+eq(C.miranOfGame(game({ hours: 3, sessions: [sess("2026-01-01", 3)] })), 30,
+  "3 ساعات حقيقية = 30 مِران (10 للساعة)");
+eq(C.miranOfGame(game({ hours: 3, sessions: [sess("2026-01-01", 3, "backfill")] })), 0,
+  "الوقت التعويضي (backfill) لا يعطي مِرانًا");
+ok(C.miranOfGame(game({ hours: -50 })) >= 0, "الساعات السالبة لا تعطي مِرانًا سالبًا");
+eq(C.miranOfGame(game({ hours: "abc" })), 0, "الساعات النصّية تُعامَل صفرًا");
+
+/* رصيد المِران = الألعاب + الألقاب + الانتظام. التحديات والسلسلة انتقلتا من
+   XP إلى المِران لأنهما تقيسان الانتظام — محورًا لا يقيسه مِران الألعاب. */
+{
+  const gs = [game({
+    type: "physical", hours: 30,
+    playthroughs: [{ date: "2026-08-03", hours: 10, n: 1 }],
+    sessions: ["2026-08-01", "2026-08-02", "2026-08-03"].map(d => sess(d, 10))
+  })];
+  ok(C.challengeMiran(gs) + C.streakMiran(gs) > 0, "الانتظام يعطي مِرانًا فعلًا");
+  eq(C.miranTotal(gs),
+    C.miranGames(gs) + C.earnedTitles(gs).length * 1000 + C.challengeMiran(gs) + C.streakMiran(gs),
+    "مجموع بنود المِران = الرصيد المعروض (لا فارق غير مفسَّر)");
+  /* ⚠️ مسار الموسم عرضٌ لا رصيد: إضافته كانت ستدفع مرّتين عن الساعة الواحدة */
+  const sn = C.seasonInfo(gs);
+  ok(sn.xp > 0, "مسار الموسم يقيس نشاط الربع");
+  ok(C.miranTotal(gs) < C.miranGames(gs) + C.earnedTitles(gs).length * 1000
+     + C.challengeMiran(gs) + C.streakMiran(gs) + sn.xp,
+    "ولا يُضاف إلى الرصيد — لا مقياس ثانٍ لنفس الساعة (خطأ ١٤)");
+}
 
 /* ═══════════ ② الرتب ═══════════ */
 G("② الرتب");
 noThrow(() => C.arcadeRankOf(null), "arcadeRankOf(null) لا ينهار");
-noThrow(() => C.gameRankOf(null), "gameRankOf(null) لا ينهار");
-eq(C.gameRankInfo(0).cleared, 0, "لعبة بلا تختيمات ⇒ بلا رتبة");
-eq(C.gameRankInfo(1).cleared, 1, "أول تختيمة تفتح الرتبة الأولى");
-eq(C.gameRankInfo(3).pts, 25 * 2 * 3 / 2, "نقاط رتب الألعاب تراكمية");
-ok(C.gameScore([game({ hours: -50 })]) >= 0, "الساعات السالبة لا تعطي نقاط لعب سالبة");
-eq(C.gameScore([game({ hours: "abc" })]), 0, "الساعات النصّية تُعامَل صفرًا");
-{
-  /* رتبة اللعب يجب أن ترى ما يراه XP بالضبط: الجلسات الحقيقية دون التعويضية.
-     كانت تقرأ حقل hours الخام فتحتسب وقتًا لا يظهر في أي إحصاء آخر. */
-  const g0 = game({ hours: 40, sessions: [sess("2026-01-01", 1), sess("2026-01-01", 39, "backfill")] });
-  eq(C.gameScore([g0]), 1, "رتبة اللعب تستثني الوقت التعويضي كما يستثنيه XP");
-  eq(C.gameScore([game({ hours: 5, sessions: [sess("2026-01-01", 5)] })]), 5, "الجلسات الحقيقية تُحتسب كاملة");
-  eq(C.gameScore([game({ hours: 0, sessions: [], playthroughs: [{ date: "2026-01-01", hours: 2, n: 1 }] })]), 20,
-    "التختيمة الواحدة = 20 نقطة لعب");
-}
+noThrow(() => C.miranRankOf(null), "miranRankOf(null) لا ينهار");
+eq(C.miranRankOf([]).score, 0, "مكتبة فارغة ⇒ صفر مِران لا انهيار");
+
 
 /* ═══════════ ③ الأركيد ═══════════ */
 G("③ الأركيد");
@@ -396,8 +395,8 @@ G("⑧ نظام المِران");
   noThrow(() => C.cycleHours(null), "cycleHours(null) لا ينهار");
   noThrow(() => C.cycleHours(game({ playthroughs: [{ n: 1 }] })), "تختيمة بلا تاريخ لا تُسقط الحساب");
 
-  ok(C.baseXp([spread]) > C.baseXp([allBefore]),
-    "إعادة اللعب تعطي خبرة أعلى من نفس الساعات بلا إعادة");
+  ok(C.miranOfGame(spread) > C.miranOfGame(allBefore),
+    "إعادة اللعب تعطي مِرانًا أعلى من نفس الساعات بلا إعادة");
 }
 {
   /* وسم السَّحب — الساعات تحدّد الاسم والمدّة تصعّده */
@@ -637,20 +636,6 @@ G("⑩ سُلَّم الرتب المشترك");
   eq(C.rankOn(L, "abc").name, "أ", "نتيجة غير رقمية تُعامَل صفرًا");
 }
 
-/* ═══════════ ⑪ اتساق الإجمالي ═══════════ */
-G("⑪ اتساق نقاط الخبرة الكلية");
-{
-  /* شاشة «مصادر نقاط الخبرة» تعرض بنودًا يجب أن تجمع إلى totalXp بالضبط.
-     كان بندا التحديات والسلسلة غائبين، فظهر فارق غير مفسَّر تحت المستوى. */
-  const gs = [game({
-    type: "physical", hours: 30,
-    playthroughs: [{ date: "2026-08-03", hours: 10, n: 1 }],
-    sessions: ["2026-08-01", "2026-08-02", "2026-08-03"].map(d => sess(d, 10))
-  })];
-  const parts = C.baseXp(gs) + C.gameRankPoints(gs) + C.challengeXp(gs) + C.streakXp(gs);
-  eq(Math.round(parts), Math.round(C.totalXp(gs)), "مجموع مصادر الخبرة = الإجمالي");
-  ok(C.challengeXp(gs) + C.streakXp(gs) > 0, "التحديات والسلسلة تساهم فعلًا فلا يجوز إغفالهما");
-}
 
 /* ═══════════ ⑫ محورا التشغيل والملكية ═══════════ */
 G("⑫ التشغيل صفة على الجلسة، والملكية مشتقّة");
@@ -738,10 +723,10 @@ G("⑫ التشغيل صفة على الجلسة، والملكية مشتقّة
     const before = [game({ hardware: "emulator", type: "downloaded", hours: 5,
       sessions: [sess("2026-01-01", 5)], playthroughs: [{ date: "2026-01-01", hours: 5, n: 1 }] })];
     const after = C.migrateGamesList(before).games;
-    eq(C.baseXp(after), C.baseXp(before), "الترحيل لا يمسّ نقاط الخبرة");
+    eq(C.miranTotal(after), C.miranTotal(before), "الترحيل لا يمسّ رصيد المِران");
     eq(C.miranTotal(after), C.miranTotal(before), "الترحيل لا يمسّ نقاط المِران");
     eq(C.realPlayHours(after[0]), C.realPlayHours(before[0]), "الترحيل لا يمسّ الساعات");
-    eq(C.gameScore(after), C.gameScore(before), "الترحيل لا يمسّ نقاط اللعب");
+    eq(C.totalRealHours(after), C.totalRealHours(before), "الترحيل لا يمسّ إجمالي الساعات");
   }
 }
 
