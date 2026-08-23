@@ -6117,21 +6117,7 @@ function AchievementsView({
               E("div",{className:"wrap-ti"},E("span",null,"👑 لعبة الشهر"),E("b",null,ms.top.g.name),E("small",null,r1(ms.top.h)+" س هذا الشهر"))),
             ms.bestDay&&E("div",{className:"cert-hint",style:{borderColor:"#a78bfa55",color:"#c9c3ee"}},"🔥 أنشط يوم: "+ms.bestDay.d.slice(8)+" "+lbl(ms.bestDay.d.slice(0,7))+" بـ "+r1(ms.bestDay.h)+" ساعة")));
       })()));
-  })(), tab === "miran" && /*#__PURE__*/React.createElement("div", {
-    className: "chall-card" + (ach.chall.done ? " done" : "")
-  }, /*#__PURE__*/React.createElement("div", { className: "chall-k" }, "🎯 تحديات شهر ", ach.chall.month), /*#__PURE__*/React.createElement("div", { className: "chall-t" }, ach.chall.title), /*#__PURE__*/React.createElement("div", { className: "chall-s" }, ach.chall.done ? "✅ أُنجز! +50 نقطة إنجاز" : "جارٍ… المكافأة: +50 نقطة إنجاز"), (() => {
-    const M = new Date().toISOString().slice(0, 7);
-    let hrs = 0; const played = new Set(); let comps = 0;
-    games.forEach(g => {
-      (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill" && String(sx.at).slice(0, 7) === M) { hrs += (Number(sx.ms) || 0) / 3600000; played.add(g.id); } });
-      (g.playthroughs || []).forEach(p => { if (String(p.date || "").slice(0, 7) === M) comps++; });
-      (g.parts || []).concat(g.goals || []).forEach(pt => (pt.runs || []).forEach(r => { if (String(r.date || "").slice(0, 7) === M) comps++; }));
-    });
-    const rows = [["🏁 اختم لعبة هذا الشهر", comps, 1], ["⏱ العب 12 ساعة", Math.round(hrs * 10) / 10, 12], ["🎮 العب 5 ألعاب مختلفة", played.size, 5]];
-    return /*#__PURE__*/React.createElement("div", { className: "chall-list" }, rows.map(([t, v, tgt], i) => /*#__PURE__*/React.createElement("div", { className: "chall-row" + (v >= tgt ? " done" : ""), key: i },
-      /*#__PURE__*/React.createElement("div", { className: "chall-row-t" }, t, /*#__PURE__*/React.createElement("span", null, v >= tgt ? "✅" : Math.min(v, tgt) + " / " + tgt)),
-      /*#__PURE__*/React.createElement("div", { className: "next-bar" }, /*#__PURE__*/React.createElement("div", { className: "next-fill", style: { width: Math.min(100, Math.round(v / tgt * 100)) + "%" } })))));
-  })()), tab === "card" && /*#__PURE__*/React.createElement("div", { className: "gcard-wrap" },
+  })(),   tab === "card" && /*#__PURE__*/React.createElement("div", { className: "gcard-wrap" },
     /*#__PURE__*/React.createElement("button", { className: "btn ghost", onClick: () => { const d = drawGamercard(games); if (d) setGcard(d); } }, "🪪 إنشاء بطاقة اللاعب"),
     gcard && /*#__PURE__*/React.createElement("div", { className: "gcard-out" },
       /*#__PURE__*/React.createElement("img", { src: gcard, alt: "بطاقة اللاعب", className: "gcard-img" }),
@@ -6145,57 +6131,19 @@ function AchievementsView({
         covers[k.id] ? /*#__PURE__*/React.createElement("img", { src: covers[k.id], alt: k.name, loading: "lazy" }) : /*#__PURE__*/React.createElement("div", { className: "b-noart" }, "🎮"),
         /*#__PURE__*/React.createElement("span", { className: "plat-mark" }, "💎"),
         /*#__PURE__*/React.createElement("div", { className: "b-name" }, k.name)))));
-  })(), /*#__PURE__*/React.createElement("div", {
-    className: "stat-grid"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "stat"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "stat-n"
-  }, total), /*#__PURE__*/React.createElement("div", {
-    className: "stat-l"
-  }, "ألعاب")), /*#__PURE__*/React.createElement("div", {
-    className: "stat"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "stat-n",
-    style: {
-      color: "#f5b942"
-    }
-  }, done), /*#__PURE__*/React.createElement("div", {
-    className: "stat-l"
-  }, "مكتملة")), /*#__PURE__*/React.createElement("div", {
-    className: "stat"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "stat-n"
-  }, hours), /*#__PURE__*/React.createElement("div", {
-    className: "stat-l"
-  }, "ساعة لعب")), /*#__PURE__*/React.createElement("div", {
-    className: "stat"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "stat-n",
-    style: {
-      color: "#a78bfa"
-    }
-  }, ach.totalTiers), /*#__PURE__*/React.createElement("div", {
-    className: "stat-l"
-  }, "رتب مفتوحة")), /*#__PURE__*/React.createElement("div", {
-    className: "stat"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "stat-n",
-    style: {
-      color: "#f472b6"
-    }
-  }, ach.points), /*#__PURE__*/React.createElement("div", {
-    className: "stat-l"
-  }, "نقاط إنجاز")), /*#__PURE__*/React.createElement("div", {
-    className: "stat"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "stat-n",
-    style: {
-      color: "#22d3ee"
-    }
-  }, ach.badgesDone, "/", BADGES.length), /*#__PURE__*/React.createElement("div", {
-    className: "stat-l"
-  }, "أوسمة"))), closest && /*#__PURE__*/React.createElement("div", {
+  })(), tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "stat-grid" },
+      [[total, "لعبة في مكتبتك"], [done, "مكتملة"], [hours, "ساعة لعب"]].map(([v, l]) =>
+        /*#__PURE__*/React.createElement("div", { className: "stat", key: l },
+          /*#__PURE__*/React.createElement("div", { className: "stat-n" }, v),
+          /*#__PURE__*/React.createElement("div", { className: "stat-l" }, l)))),
+    tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "stat-strip" },
+      [[ach.badgesDone + "/" + BADGES.length, "أوسمة", "#22d3ee"],
+       [ach.totalTiers, "رتب مفتوحة", "#a78bfa"],
+       [ach.points, "نقاط إنجاز", "#f472b6"]].map(([v, l, c]) =>
+        /*#__PURE__*/React.createElement("div", { className: "ss-cell", key: l },
+          /*#__PURE__*/React.createElement("b", { style: { color: c } }, v),
+          /*#__PURE__*/React.createElement("span", null, l)))), tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "section-title", style: { marginTop: 16 } }, "🎯 ما التالي"),
+  tab === "miran" && closest && /*#__PURE__*/React.createElement("div", {
     className: "next-card",
     style: {
       "--tc": tierColor(closest.cleared)
@@ -6253,10 +6201,26 @@ function AchievementsView({
         /*#__PURE__*/React.createElement("div", { className: "sn-tt" },
           /*#__PURE__*/React.createElement("b", null, stk.cur > 0 ? "سلسلة " + stk.cur + " " + (stk.cur > 10 ? "يومًا" : stk.cur > 2 ? "أيام" : stk.cur === 2 ? "يومين" : "يوم") : "لا توجد سلسلة نشطة"),
           /*#__PURE__*/React.createElement("span", null, "🏅 أفضل سلسلة: ", stk.best, " • كل يوم متتالٍ +10 مِران وكل 7 أيام +50 مِران (مع رحمة تخطّي يوم واحد)"))));
-  })(), tab === "miran" && /*#__PURE__*/React.createElement("div", {
+  })(),
+  tab === "miran" && /*#__PURE__*/React.createElement("div", {
+    className: "chall-card" + (ach.chall.done ? " done" : "")
+  }, /*#__PURE__*/React.createElement("div", { className: "chall-k" }, "🎯 تحديات شهر ", ach.chall.month), /*#__PURE__*/React.createElement("div", { className: "chall-t" }, ach.chall.title), /*#__PURE__*/React.createElement("div", { className: "chall-s" }, ach.chall.done ? "✅ أُنجز! +50 نقطة إنجاز" : "جارٍ… المكافأة: +50 نقطة إنجاز"), (() => {
+    const M = new Date().toISOString().slice(0, 7);
+    let hrs = 0; const played = new Set(); let comps = 0;
+    games.forEach(g => {
+      (g.sessions || []).forEach(sx => { if (sx && sx.src !== "backfill" && String(sx.at).slice(0, 7) === M) { hrs += (Number(sx.ms) || 0) / 3600000; played.add(g.id); } });
+      (g.playthroughs || []).forEach(p => { if (String(p.date || "").slice(0, 7) === M) comps++; });
+      (g.parts || []).concat(g.goals || []).forEach(pt => (pt.runs || []).forEach(r => { if (String(r.date || "").slice(0, 7) === M) comps++; }));
+    });
+    const rows = [["🏁 اختم لعبة هذا الشهر", comps, 1], ["⏱ العب 12 ساعة", Math.round(hrs * 10) / 10, 12], ["🎮 العب 5 ألعاب مختلفة", played.size, 5]];
+    return /*#__PURE__*/React.createElement("div", { className: "chall-list" }, rows.map(([t, v, tgt], i) => /*#__PURE__*/React.createElement("div", { className: "chall-row" + (v >= tgt ? " done" : ""), key: i },
+      /*#__PURE__*/React.createElement("div", { className: "chall-row-t" }, t, /*#__PURE__*/React.createElement("span", null, v >= tgt ? "✅" : Math.min(v, tgt) + " / " + tgt)),
+      /*#__PURE__*/React.createElement("div", { className: "next-bar" }, /*#__PURE__*/React.createElement("div", { className: "next-fill", style: { width: Math.min(100, Math.round(v / tgt * 100)) + "%" } })))));
+  })()), tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "section-title", style: { marginTop: 16 } }, "🏅 ما أنجزته"),
+  tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "level-card chwk-card",
     style: { marginTop: 14 }
-  }, /*#__PURE__*/React.createElement("div", { className: "section-title" }, "📜 سجل الليفل"),
+  }, /*#__PURE__*/React.createElement("div", { className: "section-title" }, "📜 سجل الترقّي"),
 (levelLog && levelLog.length) ? levelLog.map((e, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
       className: "ach-run silver",
@@ -6424,7 +6388,7 @@ function AchievementsView({
       })));
   })(), tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "section-title"
-  }, "المكتبة حسب العائلة"), tab === "miran" && /*#__PURE__*/React.createElement("div", {
+  }, "📚 مكتبتك حسب العائلة"), tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "family-bars"
   }, byFamily.map(([f, n]) => /*#__PURE__*/React.createElement("div", {
     key: f,
@@ -9670,6 +9634,12 @@ const CSS = `
 .xp-fill { height:100%; background:linear-gradient(90deg,var(--gold-3),var(--gold-2)); border-radius:var(--rf); transition:width .6s var(--ease); box-shadow:0 0 12px color-mix(in srgb,var(--gold) 50%,transparent); }
 .xp-text { font-size:11.5px; color:var(--txt-3); margin-top:8px; }
 .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:11px; }
+/* صفّ ثانوي: عدّادات التقدّم لا تنافس أرقام مكتبتك في الحجم — ستة مربّعات
+   متساوية كانت تعني أن لا شيء منها مهم. */
+.stat-strip{ display:flex; gap:6px; margin-top:8px; padding:8px 10px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); }
+.ss-cell{ flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:1px; text-align:center; }
+.ss-cell b{ font-family:var(--num); font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; }
+.ss-cell span{ font-size:10px; color:var(--txt-4); }
 .stat { background:linear-gradient(180deg,var(--s1),var(--card-2)); border:1px solid var(--line); border-radius:var(--r3); padding:17px 8px; text-align:center; box-shadow:var(--sh1); transition:.18s var(--ease); }
 .stat:hover { border-color:var(--line-3); transform:translateY(-2px); }
 .stat-n { font-family:'Chakra Petch',sans-serif; font-size:24px; font-weight:800; font-variant-numeric:tabular-nums; }
