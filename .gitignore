@@ -5,3 +5,8 @@ games_editable*
 # ملفات مسوّدة/اختبار محلية
 scratch_*
 .claude/
+
+# أسرار خادم الدفع — لا تُرفع إطلاقًا
+vapid.json
+push-worker/.dev.vars
+push-worker/node_modules/

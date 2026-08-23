@@ -1,0 +1,23 @@
+name = "gamelib-timer-push"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# كل دقيقة: أدقّ ما يتيحه cron في Cloudflare، ويكفي لتذكير كل 5 دقائق
+[triggers]
+crons = ["* * * * *"]
+
+# أنشئ الفضاء بـ: wrangler kv namespace create REMINDERS
+# ثم ضع المعرّف هنا
+[[kv_namespaces]]
+binding = "REMINDERS"
+id = "ضع-معرّف-الفضاء-هنا"
+
+[vars]
+VAPID_SUBJECT = "mailto:hr.records.center@gmail.com"
+# المفتاح العام ليس سرًّا — يظهر في كود العميل أيضًا
+VAPID_PUBLIC_KEY = "BDRTsHUoZOVC27WwNMDwLF4NJv93yIIozjW0aruTgFu79A7YARQFnMldBTWAbGw63lcF8mzxAnJG6STMj-74ZpM"
+
+# ⚠️ الأسرار الثلاثة تُضبط بالأمر لا في هذا الملف:
+#   wrangler secret put VAPID_PRIVATE_KEY
+#   wrangler secret put VAPID_PUBLIC_X
+#   wrangler secret put VAPID_PUBLIC_Y

@@ -7,7 +7,7 @@
 
 /* ⚠️ ارفع هذا الرقم مع أي تغيير في الملفات المخزَّنة، وإلا بقي المستخدم على
    نسخة قديمة: قاعدة activate تحذف كل كاش اسمه مختلف، فبلا تغيير الاسم لا يُحذف شيء. */
-const CACHE_VERSION = "v16";
+const CACHE_VERSION = "v17";
 const CACHE_NAME = "gamelib-" + CACHE_VERSION;
 const SHELL_FILES = [
   "./",
@@ -175,6 +175,33 @@ function readTimerFromIDB() {
     } catch { resolve(null); }
   });
 }
+
+/* ---------- دفعة Web Push: الطريق الوحيد المضمون والتطبيق مغلق ----------
+   الدفعة تصل **بلا حمولة** عمدًا: الخادم لا يعرف ما تلعب ولا كم لعبت، وكل
+   ما يفعله أنه يوقظ هذا العامل في وقته. والعامل يقرأ حالة العدّاد من
+   IndexedDB — نفس المصدر الذي يقرأ منه `rearmFromIDB` — ويركّب الإشعار هنا.
+   فالبيانات لا تغادر الجهاز، والإشعار يصل ولو كان التطبيق مغلقًا كليًا.
+
+   ⚠️ لا تُظهر إشعارًا إن كان العدّاد متوقّفًا: الدفعة قد تصل متأخّرة بعد أن
+   يوقف المستخدم العدّاد، فتذكّره بشيء انتهى. الحالة المخزَّنة هي الحكم. */
+self.addEventListener("push", event => {
+  event.waitUntil((async () => {
+    const t = await readTimerFromIDB();
+    if (!t || !t.running || !t.startedAt) return;          // توقّف بالفعل — لا تُزعج
+    const el = (t.accMs || 0) + (Date.now() - t.startedAt);
+    if (el < NAG_MS) return;                                // لم يمضِ ما يستحقّ تذكيرًا
+    await self.registration.showNotification("⏱️ عدّاد اللعب لا يزال شغالًا", {
+      body: (t.name || "اللعبة") + " — " + fmtMin(el) + " حتى الآن. لا تنسَ إيقافه إذا خلصت!",
+      tag: "gamelib-timer-nag",
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [250, 120, 250, 120, 250],
+      icon: ICON,
+      badge: ICON
+    });
+    await rearmFromIDB();   /* الدفعة أيقظتنا — أعِد تسليح المؤقّت المحلي أيضًا */
+  })());
+});
 
 self.addEventListener("periodicsync", event => {
   if (event.tag !== "gamelib-nag-check") return;
