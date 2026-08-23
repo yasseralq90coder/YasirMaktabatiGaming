@@ -5906,7 +5906,7 @@ function AchievementsView({
   },
   /*#__PURE__*/React.createElement("div", {
     className: "atabs"
-  }, [["miran", "🎖️ المِران"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"], ["overview", "📜 الأرشيف"], ["granks", "📜 رتب ألعابي"], ["ranks", "📜 الرتب القديمة"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+  }, [["miran", "🎖️ المِران"], ["journey", "🧭 الرحلة"], ["runs", "🏁 التختيمات"], ["games", "🎮 ألعابي"]].concat(games.some(raShows) ? [["racheevos", "🏅 إنجازات RA"]] : []).concat([["card", "🪪 كرت الجيمر"]]).map(([k, l]) => /*#__PURE__*/React.createElement("button", {
     key: k,
     className: "atab" + (tab === k ? " on" : ""),
     onClick: () => setTab(k)
@@ -5914,6 +5914,112 @@ function AchievementsView({
     className: "atab guide-btn",
     onClick: () => setShowGuide(true)
   }, "📖 الدليل")), showGuide && /*#__PURE__*/React.createElement(GuideModal, { onClose: () => setShowGuide(false) }),
+  tab === "miran" && (() => {
+    const E = React.createElement;   /* الاسم العام يُعرَّف بعد هذا المكوّن */
+    const real = realGames(games);
+    const rk = miranRankOf(real), sh = shelfRankOf(real), hn = huntRankOf(real);
+    const titles = earnedTitles(real);
+    const got = new Set(titles.map(t => t.id));
+    const feats = earnedFeats(real);
+    const gotF = new Set(feats.map(f => f.id));
+    const tr = trialsOf(real);
+    const pend = real.filter(isPending).sort((a, b) => realPlayHours(b) - realPlayHours(a));
+    const gilded = real.filter(g => gameMedal(g).gild > 0).length;
+    const mastered = real.filter(g => gameMedal(g).tier === 3).length;
+    const AXES = [["game", "🎯 أعمق الألعاب"], ["genre", "🧬 الأنواع"], ["platform", "🕹️ الأجهزة"], ["era", "🏛️ الحقب"], ["size", "📏 أصناف التختيمات"]];
+
+    const rankCard = (r, label, unit, cls) => E("div", { className: "mrank " + (cls || "") },
+      E("span", { className: "mr-ic" }, r.icon),
+      E("div", { className: "mr-i" },
+        E("b", null, r.name, r.stars ? " " + "⭐".repeat(Math.min(5, r.stars)) + (r.stars > 5 ? "×" + r.stars : "") : ""),
+        E("small", null, label, " • ", r.score.toLocaleString("ar"), " ", unit)),
+      E("div", { className: "mr-bar" }, E("div", { className: "mr-fill", style: { width: Math.round(r.pct) + "%" } })),
+      r.next ? E("small", { className: "mr-next" }, "التالية: ", r.next, " عند ", Number(r.nextAt).toLocaleString("ar")) : null);
+
+    return E("div", null,
+      E("div", { className: "mrank-wrap" },
+        rankCard(rk, "رتبتك", "مِران", "main"),
+        rankCard(hn, "الصيد", "نقطة"),
+        rankCard(sh, "الرفّ", "ساعة", "shelf")),
+
+      E("div", { className: "ach-sum", style: { marginTop: 12 } },
+        [["🥇", mastered, "أتقنتها", "#f5b942"], ["✨", gilded, "مذهّبة", "#fb923c"],
+         ["🏅", titles.length + "/" + ALL_TITLES.length, "ألقاب", "#a78bfa"],
+         ["🔖", feats.length + "/" + FEATS.length, "بصمات", "#4ade80"],
+         ["📚", pend.length, "مُعلَّقة", "#22d3ee"]]
+          .map(([ic, v, l, col], i) => E("div", { className: "ach-sum-cell", key: i },
+            E("span", { className: "as-ic" }, ic),
+            E("b", { style: { color: col } }, v),
+            E("span", null, l)))),
+
+      /* المقفل لا يأخذ وزن المفتوح: ستة عشر لقبًا رماديًا بحجمها الكامل كانت
+         تملأ الشاشة بلا شيء أنجزتَه. المفتوح يُعرَض، والباقي خلف سطر واحد. */
+      E("div", { className: "section-title" }, "🏅 الألقاب (", titles.length, "/", ALL_TITLES.length, ")"),
+      (() => {
+        const card = t => E("div", { key: t.id, className: "ttl-card" + (got.has(t.id) ? " on" : "") },
+          E("span", { className: "tc-ic" }, t.icon),
+          E("div", { className: "tc-i" }, E("b", null, t.name), E("small", null, t.req)),
+          got.has(t.id) ? E("span", { className: "tc-ok" }, "✓") : null);
+        const open = ALL_TITLES.filter(t => got.has(t.id));
+        const shut = ALL_TITLES.filter(t => !got.has(t.id));
+        return E(React.Fragment, null,
+          open.length > 0 && E("div", { className: "title-grid" }, open.map(card)),
+          open.length === 0 && E("p", { className: "bk-desc" },
+            "لم تفتح لقبًا بعد. اللقب ما تُعرّف به نفسك، وندرته بالنسبة لمكتبتك هي ما يجعله يعني شيئًا."),
+          shut.length > 0 && E("button", {
+            className: "lockbar", onClick: () => setShutOpen(v => !v)
+          }, shutOpen ? "▴ إخفاء المقفلة" : "▾ " + shut.length + " لقبًا بانتظارك"),
+          shutOpen && shut.length > 0 && E("div", { className: "title-grid" }, shut.map(card)));
+      })(),
+
+      E("div", { className: "section-title" }, "🔖 البصمات (", gotF.size, "/", FEATS.length, ")"),
+      E("p", { className: "bk-desc" },
+        "حدث فريد يقع مرة. وهنا وحدها يجوز الشرط — قد تعتمد البصمة على معدّل HowLongToBeat أو على RetroAchievements، ",
+        "بخلاف اللقب الذي يجب أن يكون في متناول كل لاعب."),
+      /* نفس قاعدة الألقاب: المقفل خلف سطر واحد لا صفوفًا رمادية بحجمها الكامل */
+      (() => {
+        const card = f => E("div", { key: f.id, className: "ttl-card feat" + (gotF.has(f.id) ? " on" : "") },
+          E("span", { className: "tc-ic" }, f.icon),
+          E("div", { className: "tc-i" }, E("b", null, f.name), E("small", null, f.req)),
+          gotF.has(f.id) ? E("span", { className: "tc-ok" }, "✓") : null);
+        const open = FEATS.filter(f => gotF.has(f.id));
+        const shut = FEATS.filter(f => !gotF.has(f.id));
+        return E(React.Fragment, null,
+          open.length > 0 && E("div", { className: "title-grid" }, open.map(card)),
+          shut.length > 0 && E("button", {
+            className: "lockbar", onClick: () => setFeatOpen(v => !v)
+          }, featOpen ? "▴ إخفاء المقفلة" : "▾ " + shut.length + " بصمة بانتظارك"),
+          featOpen && shut.length > 0 && E("div", { className: "title-grid" }, shut.map(card)));
+      })(),
+      E("div", { className: "section-title" }, "📊 المِحكّات"),
+      E("p", { className: "bk-desc" },
+        "عتبات تتصاعد بلا نهاية، تُولَّد من لعبك لا من قوائم مكتوبة. الجهاز والحقبة بالساعات وحدها — عدد الألعاب اقتناء لا لعب."),
+      AXES.map(([k, label]) => tr[k].length ? E("div", { key: k, className: "trial-grp" },
+        E("div", { className: "chall-k" }, label),
+        tr[k].slice(0, 5).map((x, i) => E("div", { className: "trial", key: i },
+          E("div", { className: "tr-top" },
+            E("span", { className: "tr-l" }, x.label),
+            E("b", null, x.value.toLocaleString("ar"), " ", x.unit)),
+          E("div", { className: "mr-bar" },
+            E("div", { className: "mr-fill", style: { width: Math.min(100, Math.round(x.value / x.next * 100)) + "%" } })),
+          E("small", { className: "tr-n" }, "المستوى ", x.tier, " • التالي عند ", x.next.toLocaleString("ar"))))
+      ) : null),
+
+      pend.length ? E(React.Fragment, null,
+        E("div", { className: "section-title" }, "🗄️ رفّك"),
+        E("p", { className: "bk-desc" },
+          "ساعات جلستها فعلًا في ألعاب لم تختمها بعد — ليست ضائعة، لها اسمها ورتبتها. ",
+          "وأن تعود لواحدة منها وتختمها يعطي مِرانًا مضاعفًا."),
+        E("div", { className: "shelf-list" }, pend.slice(0, 12).map(g => {
+          const t = ghostTag(g);
+          return E("button", { key: g.id, className: "shelf-row", onClick: () => onOpenGame(g.id) },
+            E("div", { className: "sr-i" },
+              E("b", null, g.name),
+              E("small", null, t ? t.icon + " " + t.name : "لم تُختَم بعد")),
+            E("span", { className: "sr-h" }, fmtHours(realPlayHours(g))));
+        }))) : null);
+  })(),
+
   tab === "journey" && /*#__PURE__*/React.createElement(JourneyView, {
     games: games, covers: covers, levelLog: levelLog, mode: themeMode, onOpen: onOpenGame
   }), tab === "runs" && /*#__PURE__*/React.createElement("div", {
@@ -6090,7 +6196,7 @@ function AchievementsView({
               E("div",{className:"wrap-ti"},E("span",null,"👑 لعبة الشهر"),E("b",null,ms.top.g.name),E("small",null,r1(ms.top.h)+" س هذا الشهر"))),
             ms.bestDay&&E("div",{className:"cert-hint",style:{borderColor:"#a78bfa55",color:"#c9c3ee"}},"🔥 أنشط يوم: "+ms.bestDay.d.slice(8)+" "+lbl(ms.bestDay.d.slice(0,7))+" بـ "+r1(ms.bestDay.h)+" ساعة")));
       })()));
-  })(), tab === "overview" && /*#__PURE__*/React.createElement("div", {
+  })(), tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "chall-card" + (ach.chall.done ? " done" : "")
   }, /*#__PURE__*/React.createElement("div", { className: "chall-k" }, "🎯 تحديات شهر ", ach.chall.month), /*#__PURE__*/React.createElement("div", { className: "chall-t" }, ach.chall.title), /*#__PURE__*/React.createElement("div", { className: "chall-s" }, ach.chall.done ? "✅ أُنجز! +50 نقطة إنجاز" : "جارٍ… المكافأة: +50 نقطة إنجاز"), (() => {
     const M = new Date().toISOString().slice(0, 7);
@@ -6109,7 +6215,7 @@ function AchievementsView({
     gcard && /*#__PURE__*/React.createElement("div", { className: "gcard-out" },
       /*#__PURE__*/React.createElement("img", { src: gcard, alt: "بطاقة اللاعب", className: "gcard-img" }),
       /*#__PURE__*/React.createElement("a", { className: "btn primary", href: gcard, download: "gamercard.png" }, "⬇️ حفظ الصورة"),
-      /*#__PURE__*/React.createElement("div", { className: "chall-s" }, "أو اضغط مطوّلًا على الصورة لحفظها/مشاركتها"))), tab === "overview" && (() => {
+      /*#__PURE__*/React.createElement("div", { className: "chall-s" }, "أو اضغط مطوّلًا على الصورة لحفظها/مشاركتها"))), tab === "miran" && (() => {
     const plats = games.filter(g => platinumOf(g));
     if (!plats.length) return null;
     return /*#__PURE__*/React.createElement("div", { className: "bundle-box plat-vault" },
@@ -6118,26 +6224,7 @@ function AchievementsView({
         covers[k.id] ? /*#__PURE__*/React.createElement("img", { src: covers[k.id], alt: k.name, loading: "lazy" }) : /*#__PURE__*/React.createElement("div", { className: "b-noart" }, "🎮"),
         /*#__PURE__*/React.createElement("span", { className: "plat-mark" }, "💎"),
         /*#__PURE__*/React.createElement("div", { className: "b-name" }, k.name)))));
-  })(), tab === "overview" && /*#__PURE__*/React.createElement("div", {
-    className: "level-card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "rank-emoji"
-  }, rank[2]), /*#__PURE__*/React.createElement("div", {
-    className: "level-info"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "rank-name"
-  }, rank[1]), /*#__PURE__*/React.createElement("div", {
-    className: "level-num"
-  }, "المستوى ", lvl.level), /*#__PURE__*/React.createElement("div", {
-    className: "xp-bar"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "xp-fill",
-    style: {
-      width: lvl.pct + "%"
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "xp-text"
-  }, lvl.into, " / ", lvl.need, " نقطة • الإجمالي ", xp, " XP"))), /*#__PURE__*/React.createElement("div", {
+  })(), /*#__PURE__*/React.createElement("div", {
     className: "stat-grid"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat"
@@ -6211,17 +6298,8 @@ function AchievementsView({
     }
   })), /*#__PURE__*/React.createElement("div", {
     className: "next-sub"
-  }, "تبقّى ", /*#__PURE__*/React.createElement("b", null, closest.remain), " ", closest.unit, " • ", closest.value, " / ", closest.next)))), tab === "overview" && (() => { const gr = gameRankOf(games); return /*#__PURE__*/React.createElement("div", { className: "level-card chwk-card", style: { marginTop: 14 } },
-    /*#__PURE__*/React.createElement("div", { className: "section-title" }, "🎮 رتبة اللعب"),
-    /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 10 } },
-      /*#__PURE__*/React.createElement("div", { style: { fontSize: 36 } }, gr.icon),
-      /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
-        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 18 } }, gr.name),
-        /*#__PURE__*/React.createElement("div", { style: { opacity: .7, fontSize: 12 } }, "المرتبة " + gr.tier + " • " + gr.score + " نقطة لعب"))),
-    /*#__PURE__*/React.createElement("div", { style: { background: "rgba(255,255,255,.08)", borderRadius: 8, height: 10, overflow: "hidden" } },
-      /*#__PURE__*/React.createElement("div", { style: { width: gr.pct + "%", height: "100%", background: "linear-gradient(90deg,#22d3ee,#a78bfa)" } })),
-    /*#__PURE__*/React.createElement("div", { style: { opacity: .7, fontSize: 12, marginTop: 6 } }, gr.next ? ("التالية: " + gr.next + " عند " + gr.nextAt + " نقطة (باقٍ " + Math.max(0, gr.nextAt - gr.score) + ")") : "أعلى رتبة 🌌")); })(),
-    tab === "overview" && (() => {
+  }, "تبقّى ", /*#__PURE__*/React.createElement("b", null, closest.remain), " ", closest.unit, " • ", closest.value, " / ", closest.next)))), 
+    tab === "miran" && (() => {
     const sn = seasonInfo(games);
     return /*#__PURE__*/React.createElement("div", { className: "level-card season-card", style: { marginTop: 14 } },
       /*#__PURE__*/React.createElement("div", { className: "sn-head" },
@@ -6236,7 +6314,7 @@ function AchievementsView({
       /*#__PURE__*/React.createElement("div", { className: "next-bar", style: { marginTop: 8 } }, /*#__PURE__*/React.createElement("div", { className: "next-fill", style: { width: (sn.tier >= SEASON_TIERS ? 100 : sn.pct) + "%" } })),
       /*#__PURE__*/React.createElement("div", { className: "sn-sub" }, sn.tier >= SEASON_TIERS ? "👑 أتممت مسار الموسم كاملًا!" : "المكافأة القادمة: " + sn.rewards[sn.tier] + " — تبقّى " + (SEASON_STEP * (sn.tier + 1) - sn.xp) + " XP"),
       sn.tier > 0 && /*#__PURE__*/React.createElement("div", { className: "sn-got" }, "🎁 مكافآتك: ", sn.rewards.slice(0, sn.tier).join(" • ")));
-  })(), tab === "overview" && (() => {
+  })(), tab === "miran" && (() => {
     const ws = weekStartOf(Date.now());
     const chs = weeklyChallenges(games, ws);
     const stk = playStreakOf(games);
@@ -6254,7 +6332,7 @@ function AchievementsView({
         /*#__PURE__*/React.createElement("div", { className: "sn-tt" },
           /*#__PURE__*/React.createElement("b", null, stk.cur > 0 ? "سلسلة " + stk.cur + " " + (stk.cur > 10 ? "يومًا" : stk.cur > 2 ? "أيام" : stk.cur === 2 ? "يومين" : "يوم") : "لا توجد سلسلة نشطة"),
           /*#__PURE__*/React.createElement("span", null, "🏅 أفضل سلسلة: ", stk.best, " • كل يوم متتالٍ +10 XP وكل 7 أيام +50 XP (مع رحمة تخطّي يوم واحد)"))));
-  })(), tab === "overview" && /*#__PURE__*/React.createElement("div", {
+  })(), tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "level-card chwk-card",
     style: { marginTop: 14 }
   }, /*#__PURE__*/React.createElement("div", { className: "section-title" }, "📜 سجل الليفل"),
@@ -6327,83 +6405,7 @@ function AchievementsView({
     }, FAM_ICON[familyOf(it.g.platform)] || "📦", " ", it.g.platform, " • ", it.gold ? "✅ اكتملت 100%" : "🎮 أقل من 100%", " • ", it.runs === 1 ? "ختمة واحدة" : it.runs + " ختمات", it.doneParts.length ? " • 🧩 " + it.doneParts.join("، ") : ""), /*#__PURE__*/React.createElement("div", {
       className: "ach-run-foot"
     }, /*#__PURE__*/React.createElement("span", null, "⏱️ ", fmtHours(it.g.hours)))))))));
-  })(), tab === "granks" && (() => {
-    const list = gameRanksAll(games);
-    const totPts = list.reduce((s, x) => s + x.info.pts, 0);
-    return /*#__PURE__*/React.createElement("div", { className: "track-list" },
-      /*#__PURE__*/React.createElement("div", { className: "grank-sum" }, "🎖️ رتب مفتوحة: ", /*#__PURE__*/React.createElement("b", null, list.reduce((s, x) => s + x.info.cleared, 0)), " • نقاط محسوبة في مستواك: ", /*#__PURE__*/React.createElement("b", { style: { color: "#f5b942" } }, totPts)),
-      ach.gdone.length > 0 && /*#__PURE__*/React.createElement("div", { className: "grank-sum", style: { borderColor: "#ffd47966", background: "#ffd4790d" } }, "👑 مجموعات أكملتها بالكامل (+40 نقطة لكل واحدة): ", ach.gdone.map(n => /*#__PURE__*/React.createElement("b", { key: n, style: { color: "#ffd479", marginInlineStart: 6 } }, "🧩 ", n))),
-      list.length === 0 ? /*#__PURE__*/React.createElement("div", { className: "chart-empty" }, "اختم أي لعبة لتفتح أول رتبة لها 🎮") : list.map(({ g, count, info }) => /*#__PURE__*/React.createElement("div", {
-        className: "track", key: g.id, style: { "--tc": tierColor(info.cleared) }
-      }, /*#__PURE__*/React.createElement("div", { className: "track-head" },
-        covers[g.id] ? /*#__PURE__*/React.createElement("img", { className: "grank-cv", src: covers[g.id], alt: "" }) : /*#__PURE__*/React.createElement("span", { className: "track-ic" }, "🎮"),
-        /*#__PURE__*/React.createElement("div", { className: "track-tt" }, /*#__PURE__*/React.createElement("b", null, g.name), /*#__PURE__*/React.createElement("span", { className: "track-rank" }, info.name + " — الرتبة " + info.cleared + (g.group ? " • 🧩 " + g.group : ""))),
-        /*#__PURE__*/React.createElement("span", { className: "track-val" }, count, " تختيمة", /*#__PURE__*/React.createElement("small", { style: { display: "block", color: "#f5b942" } }, "+", info.pts, " نقطة"))),
-        /*#__PURE__*/React.createElement("div", { className: "next-bar" }, /*#__PURE__*/React.createElement("div", { className: "next-fill", style: { width: Math.min(100, Math.round(count / info.next * 100)) + "%" } })),
-        /*#__PURE__*/React.createElement("div", { className: "next-sub" }, "الرتبة ", info.cleared + 1, " (", info.nextName, "): ", info.next, " تختيمة — تبقّى ", info.next - count, " • ستمنحك +", 25 * (info.cleared + 1), " نقطة"))));
-  })(), tab === "ranks" && (() => {
-    const allRuns = games.flatMap(g => [...(g.playthroughs || []), ...(g.parts || []).concat(g.goals || []).flatMap(pt => pt.runs || [])]);
-    const doneGames = games.filter(g => (g.playthroughs || []).length || (g.parts || []).concat(g.goals || []).some(pt => (pt.runs || []).length)).length;
-    const masters = allRuns.filter(r => r.kind === "master").length;
-    const totH = games.reduce((t, g) => t + (Number(g.hours) || 0), 0);
-    const done = games.filter(g => (g.playthroughs || []).length || (g.parts || []).concat(g.goals || []).some(pt => (pt.runs || []).length));
-    const metrics = [["🏆", "ألعاب مختومة", doneGames, "لعبة"], ["🏁", "إجمالي التختيمات", allRuns.length, "تختيمة"], ["⏱️", "ساعات اللعب", Math.floor(totH), "ساعة"], ["🕰️", "ريترو: ختم ألعاب ما قبل 2000", done.filter(g => Number(g.year) && Number(g.year) < 2000).length, "لعبة"], ["📼", "كلاسيكيات 2000-2009", done.filter(g => Number(g.year) >= 2000 && Number(g.year) < 2010).length, "لعبة"], ["🎬", "جيل 2010-2019", done.filter(g => Number(g.year) >= 2010 && Number(g.year) < 2020).length, "لعبة"], ["👑", "أعظم الألعاب بالتاريخ (GOAT)", done.filter(g => isGoat(g.name)).length, "لعبة"], ["🔴", "ختمات NSO (كل الأنظمة)", done.filter(g => g.nso).length, "لعبة"]];
-    Object.keys(NSO_SYSTEMS).forEach(k => {
-      const c = done.filter(g => g.nso && g.nsoSystem === k).length;
-      if (c > 0) metrics.push([NSO_SYSTEMS[k].icon, "ختم ألعاب " + NSO_SYSTEMS[k].label, c, "لعبة"]);
-    });
-    {
-      const st = playStreakOf(games);
-      if (st.best > 0) metrics.push(["🔥", "أطول سلسلة أيام لعب متتالية", st.best, "يوم"]);
-      const sessN = games.reduce((t, g) => t + (g.sessions || []).filter(s => s && s.src !== "backfill").length, 0);
-      if (sessN > 0) metrics.push(["🎮", "جلسات اللعب المسجَّلة", sessN, "جلسة"]);
-      const dayN = new Set(games.flatMap(g => (g.sessions || []).filter(s => s && s.src !== "backfill").map(s => localDay(s.at)))).size;
-      if (dayN > 0) metrics.push(["📆", "أيام لعبت فيها", dayN, "يوم"]);
-      const platN = games.filter(platinumOf).length;
-      if (platN > 0) metrics.push(["💎", "بلاتينيوم شخصي محقق", platN, "بلاتينيوم"]);
-      const arcadeRuns = games.filter(g => g.arcadeMode).reduce((t, g) => t + (g.playthroughs || []).length, 0);
-      if (arcadeRuns > 0) metrics.push(["🕹️", "تختيمات أركيد تلقائية (كل 3 ساعات)", arcadeRuns, "تختيمة"]);
-    }
-    Object.keys(FAMILIES).forEach(f => {
-      const c = done.filter(g => familyOf(g.platform) === f).length;
-      if (c > 0) metrics.push([FAM_ICON[f], "ختمات على أجهزة " + FAMILIES[f].label, c, "لعبة"]);
-    });
-    GENRES.forEach(gn => {
-      const c = done.filter(g => g.genre === gn).length;
-      if (c > 0) metrics.push(["🎯", "ختمات " + gn, c, "لعبة"]);
-    });
-    return /*#__PURE__*/React.createElement("div", {
-      className: "track-list"
-    }, metrics.map(([ic, label, v, unit], mi) => {
-      const t = infTier(v);
-      return /*#__PURE__*/React.createElement("div", {
-        className: "track",
-        key: mi,
-        style: {
-          "--tc": tierColor(t.cleared)
-        }
-      }, /*#__PURE__*/React.createElement("div", {
-        className: "track-head"
-      }, /*#__PURE__*/React.createElement("span", {
-        className: "track-ic"
-      }, ic), /*#__PURE__*/React.createElement("div", {
-        className: "track-tt"
-      }, /*#__PURE__*/React.createElement("b", null, label), /*#__PURE__*/React.createElement("span", {
-        className: "track-rank"
-      }, t.cleared > 0 ? t.name + " — المستوى " + t.cleared : "لم يبدأ بعد")), /*#__PURE__*/React.createElement("span", {
-        className: "track-val"
-      }, v, " ", unit)), /*#__PURE__*/React.createElement("div", {
-        className: "next-bar"
-      }, /*#__PURE__*/React.createElement("div", {
-        className: "next-fill",
-        style: {
-          width: Math.min(100, Math.round(v / t.next * 100)) + "%"
-        }
-      })), /*#__PURE__*/React.createElement("div", {
-        className: "next-sub"
-      }, "المستوى ", t.cleared + 1, " (", t.nextName, "): ", t.next, " ", unit, " — تبقّى ", t.next - v));
-    }));
-  })(), tab === "ranks" && /*#__PURE__*/React.createElement("div", { className: "level-card chwk-card", style: { marginTop: 14 } },
+  })(), tab === "miran" && /*#__PURE__*/React.createElement("div", { className: "level-card chwk-card", style: { marginTop: 14 } },
     /*#__PURE__*/React.createElement("div", { className: "section-title" }, "🏅 جدار الأوسمة (", ach.badgesDone, "/", BADGES.length, ")"),
     /*#__PURE__*/React.createElement("div", { className: "bwall" }, ach.badges.map(b => /*#__PURE__*/React.createElement("div", {
       key: b.id, className: "bw" + (b.done ? " on" : "") + (b.hidden && !b.done ? " hid" : "")
@@ -6413,111 +6415,7 @@ function AchievementsView({
   /* ═══════════ تبويب المِران ═══════════
      الرتب الثلاث والألقاب والمِحكّات في مكان واحد. النظام القديم (المستوى والرتب)
      ما زال قائمًا في تبويباته — لا شيء حُذف، فتقارن وتقرّر. */
-  tab === "miran" && (() => {
-    const E = React.createElement;   /* الاسم العام يُعرَّف بعد هذا المكوّن */
-    const real = realGames(games);
-    const rk = miranRankOf(real), sh = shelfRankOf(real), hn = huntRankOf(real);
-    const titles = earnedTitles(real);
-    const got = new Set(titles.map(t => t.id));
-    const feats = earnedFeats(real);
-    const gotF = new Set(feats.map(f => f.id));
-    const tr = trialsOf(real);
-    const pend = real.filter(isPending).sort((a, b) => realPlayHours(b) - realPlayHours(a));
-    const gilded = real.filter(g => gameMedal(g).gild > 0).length;
-    const mastered = real.filter(g => gameMedal(g).tier === 3).length;
-    const AXES = [["game", "🎯 أعمق الألعاب"], ["genre", "🧬 الأنواع"], ["platform", "🕹️ الأجهزة"], ["era", "🏛️ الحقب"], ["size", "📏 أصناف التختيمات"]];
-
-    const rankCard = (r, label, unit, cls) => E("div", { className: "mrank " + (cls || "") },
-      E("span", { className: "mr-ic" }, r.icon),
-      E("div", { className: "mr-i" },
-        E("b", null, r.name, r.stars ? " " + "⭐".repeat(Math.min(5, r.stars)) + (r.stars > 5 ? "×" + r.stars : "") : ""),
-        E("small", null, label, " • ", r.score.toLocaleString("ar"), " ", unit)),
-      E("div", { className: "mr-bar" }, E("div", { className: "mr-fill", style: { width: Math.round(r.pct) + "%" } })),
-      r.next ? E("small", { className: "mr-next" }, "التالية: ", r.next, " عند ", Number(r.nextAt).toLocaleString("ar")) : null);
-
-    return E("div", null,
-      E("div", { className: "mrank-wrap" },
-        rankCard(rk, "رتبتك", "مِران", "main"),
-        rankCard(hn, "الصيد", "نقطة"),
-        rankCard(sh, "الرفّ", "ساعة", "shelf")),
-
-      E("div", { className: "ach-sum", style: { marginTop: 12 } },
-        [["🥇", mastered, "أتقنتها", "#f5b942"], ["✨", gilded, "مذهّبة", "#fb923c"],
-         ["🏅", titles.length + "/" + ALL_TITLES.length, "ألقاب", "#a78bfa"],
-         ["🔖", feats.length + "/" + FEATS.length, "بصمات", "#4ade80"],
-         ["📚", pend.length, "مُعلَّقة", "#22d3ee"]]
-          .map(([ic, v, l, col], i) => E("div", { className: "ach-sum-cell", key: i },
-            E("span", { className: "as-ic" }, ic),
-            E("b", { style: { color: col } }, v),
-            E("span", null, l)))),
-
-      /* المقفل لا يأخذ وزن المفتوح: ستة عشر لقبًا رماديًا بحجمها الكامل كانت
-         تملأ الشاشة بلا شيء أنجزتَه. المفتوح يُعرَض، والباقي خلف سطر واحد. */
-      E("div", { className: "section-title" }, "🏅 الألقاب (", titles.length, "/", ALL_TITLES.length, ")"),
-      (() => {
-        const card = t => E("div", { key: t.id, className: "ttl-card" + (got.has(t.id) ? " on" : "") },
-          E("span", { className: "tc-ic" }, t.icon),
-          E("div", { className: "tc-i" }, E("b", null, t.name), E("small", null, t.req)),
-          got.has(t.id) ? E("span", { className: "tc-ok" }, "✓") : null);
-        const open = ALL_TITLES.filter(t => got.has(t.id));
-        const shut = ALL_TITLES.filter(t => !got.has(t.id));
-        return E(React.Fragment, null,
-          open.length > 0 && E("div", { className: "title-grid" }, open.map(card)),
-          open.length === 0 && E("p", { className: "bk-desc" },
-            "لم تفتح لقبًا بعد. اللقب ما تُعرّف به نفسك، وندرته بالنسبة لمكتبتك هي ما يجعله يعني شيئًا."),
-          shut.length > 0 && E("button", {
-            className: "lockbar", onClick: () => setShutOpen(v => !v)
-          }, shutOpen ? "▴ إخفاء المقفلة" : "▾ " + shut.length + " لقبًا بانتظارك"),
-          shutOpen && shut.length > 0 && E("div", { className: "title-grid" }, shut.map(card)));
-      })(),
-
-      E("div", { className: "section-title" }, "🔖 البصمات (", gotF.size, "/", FEATS.length, ")"),
-      E("p", { className: "bk-desc" },
-        "حدث فريد يقع مرة. وهنا وحدها يجوز الشرط — قد تعتمد البصمة على معدّل HowLongToBeat أو على RetroAchievements، ",
-        "بخلاف اللقب الذي يجب أن يكون في متناول كل لاعب."),
-      /* نفس قاعدة الألقاب: المقفل خلف سطر واحد لا صفوفًا رمادية بحجمها الكامل */
-      (() => {
-        const card = f => E("div", { key: f.id, className: "ttl-card feat" + (gotF.has(f.id) ? " on" : "") },
-          E("span", { className: "tc-ic" }, f.icon),
-          E("div", { className: "tc-i" }, E("b", null, f.name), E("small", null, f.req)),
-          gotF.has(f.id) ? E("span", { className: "tc-ok" }, "✓") : null);
-        const open = FEATS.filter(f => gotF.has(f.id));
-        const shut = FEATS.filter(f => !gotF.has(f.id));
-        return E(React.Fragment, null,
-          open.length > 0 && E("div", { className: "title-grid" }, open.map(card)),
-          shut.length > 0 && E("button", {
-            className: "lockbar", onClick: () => setFeatOpen(v => !v)
-          }, featOpen ? "▴ إخفاء المقفلة" : "▾ " + shut.length + " بصمة بانتظارك"),
-          featOpen && shut.length > 0 && E("div", { className: "title-grid" }, shut.map(card)));
-      })(),
-      E("div", { className: "section-title" }, "📊 المِحكّات"),
-      E("p", { className: "bk-desc" },
-        "عتبات تتصاعد بلا نهاية، تُولَّد من لعبك لا من قوائم مكتوبة. الجهاز والحقبة بالساعات وحدها — عدد الألعاب اقتناء لا لعب."),
-      AXES.map(([k, label]) => tr[k].length ? E("div", { key: k, className: "trial-grp" },
-        E("div", { className: "chall-k" }, label),
-        tr[k].slice(0, 5).map((x, i) => E("div", { className: "trial", key: i },
-          E("div", { className: "tr-top" },
-            E("span", { className: "tr-l" }, x.label),
-            E("b", null, x.value.toLocaleString("ar"), " ", x.unit)),
-          E("div", { className: "mr-bar" },
-            E("div", { className: "mr-fill", style: { width: Math.min(100, Math.round(x.value / x.next * 100)) + "%" } })),
-          E("small", { className: "tr-n" }, "المستوى ", x.tier, " • التالي عند ", x.next.toLocaleString("ar"))))
-      ) : null),
-
-      pend.length ? E(React.Fragment, null,
-        E("div", { className: "section-title" }, "🗄️ رفّك"),
-        E("p", { className: "bk-desc" },
-          "ساعات جلستها فعلًا في ألعاب لم تختمها بعد — ليست ضائعة، لها اسمها ورتبتها. ",
-          "وأن تعود لواحدة منها وتختمها يعطي مِرانًا مضاعفًا."),
-        E("div", { className: "shelf-list" }, pend.slice(0, 12).map(g => {
-          const t = ghostTag(g);
-          return E("button", { key: g.id, className: "shelf-row", onClick: () => onOpenGame(g.id) },
-            E("div", { className: "sr-i" },
-              E("b", null, g.name),
-              E("small", null, t ? t.icon + " " + t.name : "لم تُختَم بعد")),
-            E("span", { className: "sr-h" }, fmtHours(realPlayHours(g))));
-        }))) : null);
-  })(),
+  
   tab === "racheevos" && (() => {
     const raAll = games.filter(g => raShows(g) && raAchList(g).length);
     const raPlats = [...new Set(raAll.map(g => g.platform))].sort();
@@ -6603,9 +6501,9 @@ function AchievementsView({
               ? /*#__PURE__*/React.createElement("img", { key: a.id, src: raBadgeUrl(a.badge), alt: a.title, title: a.title, loading: "lazy" })
               : null)));
       })));
-  })(), tab === "overview" && /*#__PURE__*/React.createElement("div", {
+  })(), tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "section-title"
-  }, "المكتبة حسب العائلة"), tab === "overview" && /*#__PURE__*/React.createElement("div", {
+  }, "المكتبة حسب العائلة"), tab === "miran" && /*#__PURE__*/React.createElement("div", {
     className: "family-bars"
   }, byFamily.map(([f, n]) => /*#__PURE__*/React.createElement("div", {
     key: f,
