@@ -329,6 +329,44 @@ const GAMES_DB_BY_PLATFORM = (() => {
   }
   return m;
 })();
+/* ---------- تصحيح أسماء الألعاب من القاعدة المحلية ----------
+   الأسماء تُكتب على عجل: «metal gear solid» بلا أحرف كبيرة، و« ninja gaiden
+   xbox» بمسافة بادئة واسم الجهاز ملحقًا. القاعدة المحلية تحمل الاسم الرسمي.
+
+   ⚠️ **المطابقة داخل منصّة اللعبة وحدها** — وهذا شرط لا تحسين: «Sonic the
+   Hedgehog» على الجينيسيس غيرها على السويتش، والمطابقة عبر المنصّات تُصحّح
+   اسمًا إلى اسم لعبة أخرى (خطأ ٦: المطابقة الجزئية تخلط الأجيال بصمت). */
+const nameKey = n => String(n || "").toLowerCase()
+  .replace(/[‘’“”]/g, "")
+  .replace(/&/g, "and")
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim();
+/* لواحق يكتبها المستخدم للتمييز ولا وجود لها في الاسم الرسمي */
+const NAME_NOISE = /(xbox|ps1|ps2|ps3|psx|gc|gamecube|wii|snes|nes|n64|dc|dreamcast|genesis|switch|pc)/g;
+function nameFix(game) {
+  const raw = String(game && game.name || "");
+  if (!raw.trim()) return null;
+  const list = GAMES_DB_BY_PLATFORM.get(game.platform);
+  if (!list || !list.length) return null;
+  const key = nameKey(raw);
+  const lean = nameKey(raw.toLowerCase().replace(NAME_NOISE, " "));
+  let exact = null, loose = null;
+  for (const r of list) {
+    const k = nameKey(r[0]);
+    if (k === key) { exact = r[0]; break; }
+    if (!loose && lean && k === lean) loose = r[0];
+  }
+  const best = exact || loose;
+  if (!best || best === raw) return null;          // لا اقتراح أو مطابق أصلًا
+  return { id: game.id, from: raw, to: best, platform: game.platform, sure: !!exact };
+}
+/* يرجع كل الاقتراحات: الأكيدة (اختلاف شكلي بحت) أولًا */
+function nameFixes(games) {
+  const out = [];
+  for (const g of (games || [])) { if (isShell(g)) continue; const f = nameFix(g); if (f) out.push(f); }
+  return out.sort((a, b) => (b.sure ? 1 : 0) - (a.sure ? 1 : 0) || a.from.localeCompare(b.from));
+}
+
 function searchLocalGames(platform, query, limit) {
   const list = GAMES_DB_BY_PLATFORM.get(platform);
   if (!list || !list.length) return [];
@@ -3054,6 +3092,11 @@ function swWake() {
    مختلف. دالةٌ تُسأل كل مرة أرخص وأمتن. */
 const andBridge = () => (typeof window !== "undefined" && window.Android && window.Android.available) ? window.Android : null;
 const isAndroidApp = () => !!andBridge();
+/* الغلاف الأصلي يبلّغ نتيجة الحفظ عبر هذه الدالة — Toast النظام يختفي خلف
+   الواجهة في ملء الشاشة، فالرسالة داخل الصفحة أوضح. */
+if (typeof window !== "undefined") window.__androidToast = function (m) {
+  try { window.dispatchEvent(new CustomEvent("android-toast", { detail: String(m) })); } catch (e) {}
+};
 const andSafe = (fn, dflt) => { try { const A = andBridge(); return A ? fn(A) : dflt; } catch (e) { return dflt; } };
 
 function swTimerSync(timer) {
@@ -7150,6 +7193,7 @@ function BackupView({
   ach,
   onRestore,
   onMerge,
+  onFixNames,
   onRecompress,
   rawgKey,
   onSaveRawgKey,
@@ -7172,18 +7216,28 @@ function BackupView({
   const [nVib, setNVib] = useState(true);
   const [nPat, setNPat] = useState(1);
   const [nSticky, setNSticky] = useState(false);
+  const [nSound, setNSound] = useState(true);
   const [nExact, setNExact] = useState(true);
   const [nAllowed, setNAllowed] = useState(true);
   const [nTest, setNTest] = useState("");
+  useEffect(() => {
+    const h = e => setNTest(String(e.detail || ""));
+    window.addEventListener("android-toast", h);
+    return () => window.removeEventListener("android-toast", h);
+  }, []);
   useEffect(() => { andSafe(A => {
     setNOn(A.getFlag("n_timer", true));
     setNEvery(A.getSetting("n_every", 5));
     setNVib(A.getFlag("n_vibrate", true));
     setNPat(A.getSetting("n_pattern", 1));
     setNSticky(A.getFlag("n_sticky", false));
+    setNSound(A.getFlag("n_sound", true));
     setNExact(A.canScheduleExact());
     setNAllowed(A.notifAllowed());
   }); }, []);
+  const [nfSel, setNfSel] = useState(null);   // null = لم يُفتح بعد
+  const [nfMsg, setNfMsg] = useState("");
+  const nameSuggestions = useMemo(() => nameFixes(games), [games]);
   const [mrgAsk, setMrgAsk] = useState(null);
   const [mrgBusy, setMrgBusy] = useState(false);
   const [mrgMsg, setMrgMsg] = useState("");
@@ -7222,15 +7276,34 @@ function BackupView({
   const json = useMemo(() => JSON.stringify(backupObj), [backupObj]);
   const coverCount = Object.keys(covers).length;
   const download = () => {
+    const d = localDay(new Date());
+    const fname = "game-library-backup-" + d + ".json";
+    /* داخل تطبيق أندرويد: WebView لا ينزّل blob ولا يتبع <a download>،
+       فكان الزر لا يفعل شيئًا. نمرّر البيانات على دفعات للجسر ثم يختار
+       المستخدم مكان الحفظ. الدفعات لأن نسخةً بالأغلفة تتجاوز 5MB. */
+    if (isAndroidApp()) {
+      try {
+        const A = andBridge();
+        if (!A.exportBegin()) throw new Error("تعذّر فتح ملف مؤقّت");
+        const STEP = 256 * 1024;
+        for (let i = 0; i < json.length; i += STEP) {
+          if (!A.exportChunk(json.slice(i, i + STEP))) throw new Error("تعذّرت الكتابة");
+        }
+        A.exportEnd(fname);
+        setMsg({ ok: true, text: "اختر مكان الحفظ…" });
+      } catch (e) {
+        setMsg({ ok: false, text: "تعذّر التصدير: " + (e && e.message || "خطأ") });
+      }
+      return;
+    }
     try {
       const blob = new Blob([json], {
         type: "application/json"
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      const d = localDay(new Date());
       a.href = url;
-      a.download = "game-library-backup-" + d + ".json";
+      a.download = fname;
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
@@ -7631,6 +7704,10 @@ function BackupView({
     onClick: () => { setNEvery(v); andSafe(A => A.setSetting("n_every", v)); }
   }, v + " د"))),
   /*#__PURE__*/React.createElement("label", { className: "check" },
+    /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: nSound,
+      onChange: e => { const v = e.target.checked; setNSound(v); andSafe(A => A.setFlag("n_sound", v)); } }),
+    /*#__PURE__*/React.createElement("span", null, "🔊 ", /*#__PURE__*/React.createElement("b", null, "صوت التنبيه"))),
+  /*#__PURE__*/React.createElement("label", { className: "check" },
     /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: nVib,
       onChange: e => { const v = e.target.checked; setNVib(v); andSafe(A => A.setFlag("n_vibrate", v)); } }),
     /*#__PURE__*/React.createElement("span", null, "📳 ", /*#__PURE__*/React.createElement("b", null, "الاهتزاز"))),
@@ -7656,6 +7733,40 @@ function BackupView({
   /*#__PURE__*/React.createElement("p", { className: "bk-desc" },
     "الصوت ونغمة التنبيه وإظهاره على شاشة القفل يضبطها أندرويد نفسه لكل قناة — ",
     "وهذا مقصود: إعداداتٌ واحدة في مكان واحد بدل نسختين تتعارضان.")),
+  /*#__PURE__*/React.createElement("div", { className: "bk-card" }, /*#__PURE__*/React.createElement("div", { className: "bk-title" },
+    "🔤 تصحيح أسماء الألعاب"), /*#__PURE__*/React.createElement("p", {
+    className: "bk-desc"
+  }, "يقارن أسماءك بقاعدة 12 ألف لعبة ويقترح الاسم الرسمي — أحرفٌ كبيرة ونقطتان ومسافات زائدة. ",
+    /*#__PURE__*/React.createElement("b", null, "داخل منصّة اللعبة وحدها"),
+    " — «Sonic the Hedgehog» على الجينيسيس غيرها على السويتش، والمطابقة عبر الأجهزة تُصحّح اسمًا إلى لعبة أخرى."),
+  nameSuggestions.length === 0
+    ? /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, "كل الأسماء مطابقة للقاعدة ✓")
+    : /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("div", { className: "bk-desc" }, nameSuggestions.length + " اسمًا يمكن تصحيحه:"),
+        /*#__PURE__*/React.createElement("div", { className: "nf-list" }, nameSuggestions.map(f => {
+          const on = !nfSel || nfSel[f.id] !== false;
+          return /*#__PURE__*/React.createElement("label", { key: f.id, className: "nf-row" + (on ? " on" : "") },
+            /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: on,
+              onChange: e => setNfSel(Object.assign({}, nfSel || {}, { [f.id]: e.target.checked })) }),
+            /*#__PURE__*/React.createElement("div", { className: "nf-i" },
+              /*#__PURE__*/React.createElement("s", null, f.from),
+              /*#__PURE__*/React.createElement("b", null, f.to),
+              /*#__PURE__*/React.createElement("small", null, f.platform)));
+        })),
+        /*#__PURE__*/React.createElement("div", { className: "bk-actions" },
+          /*#__PURE__*/React.createElement("button", {
+            className: "btn primary",
+            onClick: async () => {
+              const pick = nameSuggestions.filter(f => !nfSel || nfSel[f.id] !== false);
+              if (!pick.length) { setNfMsg("لم تختر شيئًا"); return; }
+              const n = await onFixNames(pick);
+              setNfMsg("صُحّح " + n + " اسمًا ✓"); setNfSel(null);
+            }
+          }, "✅ صحّح المحدَّد"),
+          /*#__PURE__*/React.createElement("button", { className: "btn ghost",
+            onClick: () => setNfSel(Object.fromEntries(nameSuggestions.map(f => [f.id, false]))) },
+            "إلغاء تحديد الكل"))),
+  nfMsg && /*#__PURE__*/React.createElement("div", { className: "auto-msg done" }, nfMsg)),
   /*#__PURE__*/React.createElement("div", { className: "bk-card" }, /*#__PURE__*/React.createElement("div", { className: "bk-title" },
     "🔗 دمج نسختين لنفس اللعبة"), /*#__PURE__*/React.createElement("p", {
     className: "bk-desc"
@@ -8525,6 +8636,16 @@ function App() {
     delete coversRef.current[sourceId];
     return true;
   }, []);
+  /* تصحيح الأسماء: يطبّق ما اختاره المستخدم فقط. لا تصحيح تلقائي — الاسم
+     هوية اللعبة عنده، وقد يكون كتبه هكذا عمدًا. */
+  const applyNameFixes = useCallback(async list => {
+    if (!list || !list.length) return 0;
+    const m = {}; for (const f of list) m[f.id] = f.to;
+    const next = gamesRef.current.map(g => m[g.id] ? { ...g, name: m[g.id] } : g);
+    setGames(next); gamesRef.current = next;
+    await sset(KEY_GAMES, next);
+    return list.length;
+  }, []);
   const setParentOf = async (childId, parentId) => {
     const list = gamesRef.current.map(g => g.id === childId ? { ...g, parentId: parentId || "" } : g);
     setGames(list);
@@ -9380,6 +9501,7 @@ function App() {
     ach: ach,
     onRestore: handleRestore,
     onMerge: mergeInto,
+    onFixNames: applyNameFixes,
     onRecompress: recompressCovers,
     rawgKey: rawgKey,
     onSaveRawgKey: saveRawgKey,
@@ -10643,6 +10765,14 @@ div,span,p,b,h1,h2,h3,label { min-width:0; }
 .lockbar:hover{ color:var(--txt-2); border-color:var(--txt-4); }
 /* ===== دمج نسختَي لعبة واحدة (الإعدادات) =====
    حاويات عمودية — لا تستخدم .track هنا (خطأ ٥: هي flex صف وتسحق الأعمدة). */
+/* تصحيح الأسماء */
+.nf-list{ display:flex; flex-direction:column; gap:4px; margin-top:8px; max-height:340px; overflow-y:auto; }
+.nf-row{ display:flex; align-items:flex-start; gap:9px; padding:7px 10px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); cursor:pointer; }
+.nf-row.on{ border-color:rgba(74,222,128,.35); }
+.nf-i{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.nf-i s{ font-size:11px; color:var(--txt-4); }
+.nf-i b{ font-size:12.5px; color:#4ade80; }
+.nf-i small{ font-size:10px; color:var(--txt-4); }
 .mrg-set{ margin-top:10px; padding:10px 12px; border:1px solid var(--hair); border-radius:var(--r2); background:var(--e1); }
 .mrg-name{ font-size:13px; font-weight:800; color:var(--txt-1); margin-bottom:6px; }
 .mrg-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px 0; border-top:1px solid var(--hair); }

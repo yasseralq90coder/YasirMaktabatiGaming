@@ -907,6 +907,57 @@ G("⑮ اختيار الإصدار الصحيح من ويكيبيديا");
   ok(!C.wikiYearFits(undefined, undefined), "undefined لا ينهار");
 }
 
+/* ═══════════ ⑯ تصحيح أسماء الألعاب ═══════════ */
+G("⑯ تصحيح الأسماء داخل المنصّة وحدها");
+{
+  /* قاعدة صغيرة تُحقن كما تُحقن games_db.js في المتصفح */
+  const DB = [
+    ["Sonic the Hedgehog", "Sega Genesis", 1991, "Platformer", "SEGA", 86],
+    ["Sonic the Hedgehog", "Nintendo Switch", 2006, "Platformer", "SEGA", 43],
+    ["Max Payne 2: The Fall of Max Payne", "PlayStation 2", 2003, "Shooter", "Rockstar", 84],
+    ["Crash: Twinsanity", "Xbox (الأصلي)", 2004, "Platformer", "VU", 66]
+  ];
+  const K = require("./load-core.cjs").loadCore(
+    require("path").join(__dirname, "..", "index.html"), { GAMES_DB: DB });
+
+  const g = o => Object.assign({ id: "n" + Math.random(), name: "", platform: "PlayStation 2" }, o);
+
+  /* الاختلاف الشكلي البحت يُصحَّح */
+  eq(K.nameFix(g({ name: "max Payne 2 the fall of max payne" })).to,
+    "Max Payne 2: The Fall of Max Payne", "أحرف كبيرة ونقطتان تُصحَّح");
+  eq(K.nameFix(g({ name: "Crash Twinsanity", platform: "Xbox (الأصلي)" })).to,
+    "Crash: Twinsanity", "النقطتان المفقودتان تُضافان");
+  /* المسافات الزائدة تُقتَرح إزالتها: مكتبة المستخدم فيها «Crazy taxi » و
+     «Max Payne » بمسافة لاحقة، وهي تكسر الفرز والمطابقة بصمت. */
+  eq(K.nameFix(g({ name: "  Sonic the Hedgehog  ", platform: "Sega Genesis" })).to,
+    "Sonic the Hedgehog", "المسافات الزائدة تُقتَرح إزالتها");
+  eq(K.nameFix(g({ name: "Sonic the Hedgehog", platform: "Sega Genesis" })), null,
+    "والاسم المطابق تمامًا لا اقتراح له");
+
+  /* ⚠️ الحارس الأهمّ: لا تصحيح عبر المنصّات. اسم واحد على جهازين لعبتان
+     مختلفتان (خطأ ٦: المطابقة الجزئية تخلط الأجيال بصمت). */
+  eq(K.nameFix(g({ name: "max Payne 2 the fall of max payne", platform: "Sega Genesis" })), null,
+    "لا اقتراح من منصّة أخرى — المطابقة داخل المنصّة وحدها");
+  eq(K.nameFix(g({ name: "Crash Twinsanity", platform: "PlayStation 2" })), null,
+    "اللعبة على منصّة لا تحويها القاعدة لا تُصحَّح بقسرها من منصّة أخرى");
+
+  /* حالات لا تنهار */
+  eq(K.nameFix(g({ name: "" })), null, "اسم فارغ لا ينهار");
+  eq(K.nameFix(g({ name: "لعبة لا وجود لها" })), null, "اسم غير موجود في القاعدة");
+  eq(K.nameFix(g({ name: "x", platform: "منصّة مجهولة" })), null, "منصّة خارج القاعدة");
+  noThrow(() => K.nameFix(null), "nameFix(null) لا ينهار");
+  noThrow(() => K.nameFixes(null), "nameFixes(null) لا ينهار");
+  eq(K.nameFixes([g({ name: "Crash Twinsanity", platform: "Xbox (الأصلي)", shell: true })]).length, 0,
+    "غلاف المجموعة لا يُقترح له تصحيح");
+
+  /* الاقتراح لا يغيّر شيئًا بنفسه — التطبيق قرار المستخدم */
+  {
+    const one = g({ id: "z", name: "Crash Twinsanity", platform: "Xbox (الأصلي)" });
+    K.nameFixes([one]);
+    eq(one.name, "Crash Twinsanity", "الاقتراح لا يمسّ البيانات");
+  }
+}
+
 
 console.log("\n" + "═".repeat(46));
 console.log(fail === 0 ? "🎉 نجحت كل الاختبارات (" + pass + ")" : "⚠️  نجح " + pass + " — فشل " + fail);

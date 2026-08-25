@@ -49,6 +49,34 @@ class MainActivity : AppCompatActivity() {
     filePathCallback = null
   }
 
+  /* حفظ النسخة الاحتياطية: المستخدم يختار المكان عبر SAF فلا حاجة لأي إذن
+     تخزين، ويعمل على كل الإصدارات. الملف المؤقّت كتبه الجسر على دفعات. */
+  private val saveDoc = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+    val uri = res.data?.data
+    if (res.resultCode == RESULT_OK && uri != null) {
+      try {
+        val src = java.io.File(cacheDir, "export.tmp")
+        contentResolver.openOutputStream(uri)?.use { o -> src.inputStream().use { it.copyTo(o) } }
+        src.delete()
+        toastWeb("تم حفظ النسخة الاحتياطية ✓")
+      } catch (e: Exception) { toastWeb("تعذّر الحفظ: " + (e.message ?: "")) }
+    } else toastWeb("أُلغي الحفظ")
+  }
+
+  fun saveExportedFile(name: String) {
+    val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
+      .addCategory(Intent.CATEGORY_OPENABLE)
+      .setType("application/json")
+      .putExtra(Intent.EXTRA_TITLE, name)
+    try { saveDoc.launch(i) } catch (e: Exception) { toastWeb("لا يوجد تطبيق ملفات") }
+  }
+
+  /** يعرض رسالة داخل صفحة الويب — أوضح من Toast يختفي خلف الواجهة */
+  private fun toastWeb(msg: String) {
+    val safe = org.json.JSONObject.quote(msg)
+    web.evaluateJavascript("window.__androidToast && window.__androidToast(" + safe + ")", null)
+  }
+
   @SuppressLint("SetJavaScriptEnabled")
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)

@@ -4,6 +4,8 @@
   <!-- الإشعارات: POST_NOTIFICATIONS إذن وقت تشغيل منذ أندرويد 13 -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <!-- تذكير دقيق يخترق وضع Doze — وهذا جوهر المشكلة: العدّاد يُنسى ساعات -->
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
   <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
@@ -33,6 +35,10 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+
+    <!-- خدمة العدّاد: dataSync لأنها تراقب حالة محلية لا تشغّل وسائط -->
+    <service android:name=".TimerService" android:exported="false"
+        android:foregroundServiceType="dataSync" />
 
     <receiver android:name=".ReminderReceiver" android:exported="false" />
 

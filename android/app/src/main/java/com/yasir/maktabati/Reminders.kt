@@ -23,7 +23,8 @@ import android.os.Build
  */
 object Reminders {
 
-  const val CH_TIMER = "timer"          // تذكير العدّاد
+  const val CH_TIMER = "timer"          // تنبيه العدّاد الدوري (بصوت واهتزاز)
+  const val CH_ONGOING = "ongoing"      // الإشعار الدائم الصامت
   const val CH_GENERAL = "general"      // إنجازات وتنبيهات عامّة
   private const val REQ = 4201
 
@@ -36,7 +37,23 @@ object Reminders {
       description = "ينبّهك إذا بقي العدّاد شغّالًا بعد أن تخلّص اللعب"
       enableVibration(true)
       vibrationPattern = longArrayOf(0, 250, 120, 250, 120, 250)
+      /* صوت صريح: بلا تحديده تعتمد القناة على افتراضي قد يكون صامتًا في
+         بعض الأجهزة، فيظهر الإشعار بلا صوت ويبدو أنه لم يصل. */
+      setSound(
+        android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
+        android.media.AudioAttributes.Builder()
+          .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+          .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+          .build())
       setShowBadge(true)
+    }.also { nm.createNotificationChannel(it) }
+
+    /* قناة صامتة للإشعار الدائم: صوتٌ كل عشرين ثانية مع كل تحديث كارثة. */
+    NotificationChannel(CH_ONGOING, "العدّاد الشغّال", NotificationManager.IMPORTANCE_LOW).apply {
+      description = "إشعار دائم يعرض الوقت المنقضي ما دام العدّاد يعمل"
+      setSound(null, null)
+      enableVibration(false)
+      setShowBadge(false)
     }.also { nm.createNotificationChannel(it) }
 
     NotificationChannel(CH_GENERAL, "الإنجازات والرتب", NotificationManager.IMPORTANCE_DEFAULT).apply {
@@ -54,7 +71,9 @@ object Reminders {
   private fun pending(ctx: Context, i: Intent) = PendingIntent.getBroadcast(
     ctx, REQ, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-  /** يجدول تذكيرًا بعد [delayMs]. يستبدل أي تذكير سابق (طلب واحد بمعرّف ثابت). */
+  /** ⚠️ لم يعد يُستعمل للتذكير الدوري — الخدمة الأمامية تولّته لأن المنبّه
+   *  يُقيَّد في Doze بمرّة كل تسع دقائق. باقٍ للتنبيه التجريبي ولإعادة
+   *  التشغيل بعد الإقلاع، حيث لا خدمة تعمل بعد. */
   fun schedule(ctx: Context, name: String, startedAt: Long, delayMs: Long, every: Long) {
     val am = ctx.getSystemService(AlarmManager::class.java)
     val at = System.currentTimeMillis() + delayMs.coerceAtLeast(1000L)

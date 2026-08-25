@@ -19,3 +19,4 @@ android/gradlew.bat
 *.jks
 *.keystore
 keystore-info.txt
+serve.cjs

@@ -19,6 +19,9 @@ import android.webkit.JavascriptInterface
  */
 class WebBridge(private val act: Activity) {
 
+  private var tmp: java.io.File? = null
+  private var out: java.io.Writer? = null
+
   @JavascriptInterface
   fun available(): Boolean = true          // يكشف للويب أنه يعمل داخل الغلاف
 
@@ -31,12 +34,40 @@ class WebBridge(private val act: Activity) {
     val elapsed = System.currentTimeMillis() - started
     /* أول تذكير عند إتمام الفترة لا بعد فترة كاملة من الآن: من شغّل العدّاد
        قبل أربع دقائق يُذكَّر بعد دقيقة، لا بعد خمس. */
-    val first = every - (elapsed % every)
-    Reminders.schedule(act, name, started, first, every)
+    Prefs.saveTimer(act, name, started, every)
+    /* خدمة أمامية لا منبّه: المنبّه يُقيَّد في Doze بمرّة كل تسع دقائق،
+       فبدا التذكير وكأنه «يتوقّف بعد أول تنبيه». */
+    TimerService.start(act)
   }
 
   @JavascriptInterface
-  fun stopTimerReminder() = Reminders.cancel(act)
+  fun stopTimerReminder() {
+    Reminders.cancel(act)
+    TimerService.stop(act)
+  }
+
+  /* ---------- التصدير ----------
+     WebView لا ينزّل blob: ولا يتبع <a download> بلا DownloadListener، ولا
+     يستطيع DownloadManager قراءة blob أصلًا — فكان زر التصدير لا يفعل شيئًا.
+     الحلّ: تُمرَّر البيانات على دفعات إلى ملف مؤقّت ثم يختار المستخدم مكان
+     الحفظ. الدفعات لأن نسخة احتياطية بالأغلفة تتجاوز خمسة ميغابايت، وتمرير
+     نصّ بهذا الحجم عبر جسر جافاسكربت دفعةً واحدة غير موثوق. */
+  @JavascriptInterface
+  fun exportBegin(): Boolean = try {
+    tmp = java.io.File(act.cacheDir, "export.tmp")
+    out = java.io.BufferedWriter(java.io.OutputStreamWriter(java.io.FileOutputStream(tmp!!), "UTF-8"))
+    true
+  } catch (e: Exception) { false }
+
+  @JavascriptInterface
+  fun exportChunk(part: String): Boolean = try { out?.write(part); true } catch (e: Exception) { false }
+
+  @JavascriptInterface
+  fun exportEnd(fileName: String) {
+    try { out?.flush(); out?.close() } catch (e: Exception) {}
+    out = null
+    act.runOnUiThread { (act as MainActivity).saveExportedFile(fileName) }
+  }
 
   // ── إعدادات التنبيه ──
   @JavascriptInterface

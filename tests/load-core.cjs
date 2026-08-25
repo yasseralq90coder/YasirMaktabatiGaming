@@ -18,7 +18,10 @@ function stubEl() {
   return el;
 }
 
-function loadCore(htmlPath) {
+/* [extras] تُحقن في السياق قبل التقييم — لتحميل ما يأتي من ملفات منفصلة
+   في المتصفح (مثل GAMES_DB من games_db.js)، وإلا بدا المنطق المعتمد عليها
+   وكأنه لا يعمل بينما هو لم يجد بياناته أصلًا. */
+function loadCore(htmlPath, extras) {
   const html = fs.readFileSync(htmlPath, "utf8");
   const m = html.split(/^<script>\r?$/m);
   if (m.length < 2) throw new Error("لم أجد وسم <script> المنفرد");
@@ -72,6 +75,7 @@ function loadCore(htmlPath) {
   const exportNames = collectTopLevelNames(src);
   const wrapped = src + "\n;(" + JSON.stringify(exportNames) + ").forEach(function(n){" +
     "try { globalThis.__core[n] = eval(n); } catch (e) {} });";
+  Object.assign(sandbox, extras || {});
   sandbox.__core = {};
   new vm.Script(wrapped, { filename: "index.html:<script>" }).runInContext(sandbox, { timeout: 30000 });
   return sandbox.__core;
