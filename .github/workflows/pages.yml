@@ -1,0 +1,46 @@
+name: Verify and deploy encrypted PWA
+
+# Manual until Pages is configured for Actions. This deploys the website;
+# it does NOT claim to fetch providers or recompute Injaz.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: encrypted-gaming-pages
+  cancel-in-progress: false
+
+jobs:
+  verify-and-stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Verify application and encryption
+        run: |
+          node --check records.js
+          node --check records-crypto.js
+          node --check sw.js
+          node tests/run.cjs
+          node tests/snapshot.cjs
+          node tests/crypto.cjs
+      - name: Stage public assets only
+        run: node scripts/stage-pages.cjs "${{ runner.temp }}/encrypted-gaming-pages"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/encrypted-gaming-pages
+  deploy:
+    needs: verify-and-stage
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

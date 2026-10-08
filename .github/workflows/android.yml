@@ -3,7 +3,7 @@ name: بناء APK
 on:
   push:
     branches: [main]
-    paths: ['index.html', 'games_db.js', 'vendor/**', 'icon.svg', 'manifest.json', 'android/**', '.github/workflows/android.yml']
+    paths: ['index.html', 'records*', 'games_db.js', 'vendor/**', 'icon*', 'manifest.json', 'android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
       - name: تجهيز أصول الويب
         run: |
           mkdir -p assets-build/vendor
-          cp index.html games_db.js icon.svg manifest.json assets-build/
+          cp index.html records.html records.css records-core.js records-crypto.js records.js games_db.js icon.svg icon-192.png icon-512.png manifest.json assets-build/
           # React محلي: بدونه شاشة سوداء عند أول تشغيل بلا شبكة
           cp vendor/*.js assets-build/vendor/
           ls -lh assets-build
@@ -35,6 +35,9 @@ jobs:
           awk '/^<script>$/{f=1;next}/<\/script>/{f=0}f' index.html > /tmp/app.js
           node --check /tmp/app.js
           node --check sw.js
+          node --check records.js
+          node tests/snapshot.cjs
+          node tests/crypto.cjs
           node tests/run.cjs
 
       # AndroidManifest مكسور يفشل بعد ثلاث دقائق من البناء برسالة

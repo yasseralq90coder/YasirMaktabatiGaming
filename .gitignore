@@ -20,3 +20,12 @@ android/gradlew.bat
 *.keystore
 keystore-info.txt
 serve.cjs
+
+# Private snapshots and browser-test output must never reach GitHub Pages.
+gaming-snapshot*.json
+private/
+test-results/
+.env
+.env.*
+!*.env.example
+_site/

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#091317">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>سجلّي • إنجاز</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="records.css">
+  <script defer src="records-core.js"></script>
+  <script defer src="records-crypto.js"></script>
+  <script defer src="records.js"></script>
+</head>
+<body>
+  <header class="topbar"><a href="index.html">مكتبتي الجيمرية ↗</a><span class="pill">سجل خاص على هذا الجهاز</span></header>
+  <main>
+    <section id="lockbox" class="panel" aria-labelledby="lock-title">
+      <h2 id="lock-title">سجلّك مقفل 🔒</h2>
+      <p>الموقع عام، لكن بياناتك تُخزَّن مشفّرة. أدخل عبارة المرور لفتحها على هذا الجهاز. كلمة المرور لا تُرسل إلى الموقع ولا تُحفظ في المتصفح.</p>
+      <label for="vault-password">عبارة المرور</label><input id="vault-password" type="password" autocomplete="off" minlength="14" maxlength="1024" placeholder="عبارة طويلة، لا رقم قصير">
+      <label for="vault-confirm">تأكيد العبارة عند تشفير ملف غير مشفّر لأول مرة</label><input id="vault-confirm" type="password" autocomplete="off" maxlength="1024" placeholder="لا يلزم لفتح سجل مشفّر موجود">
+      <button id="unlock">فتح السجل المحفوظ</button>
+      <p>لأول استخدام: اختر عبارة طويلة، ثم استورد ملف اللقطة أدناه؛ سيُشفّر قبل حفظه. احتفظ بالعبارة في مكان آمن؛ لا توجد استعادة لها.</p>
+    </section>
+    <section class="intro"><p class="eyebrow">لعبك. رحلتك. إنجازك.</p><h1>كل ساعة لها حكاية.</h1><p>رتبتك وإنجازاتك وإحصائياتك من لقطة محسوبة بالمحرّك الأصلي، محفوظة هنا دون اتصال بـYasirXcenter.</p></section>
+    <section class="panel transfer" aria-labelledby="transfer-title">
+      <div><h2 id="transfer-title">تحديث السجل</h2><p>استورد ملف gaming-snapshot. سنعرض معاينة قبل اعتماده. ملف profile.json والنسخ الخام غير مقبولة هنا.</p><p id="stamp">لم تُستورد لقطة بعد.</p></div>
+      <div class="actions"><label class="button" for="snapshot-file">اختيار ملف اللقطة</label><input id="snapshot-file" type="file" accept=".json,application/json"><button id="fetch-encrypted">جلب النسخة المشفّرة من الموقع</button><button id="export" disabled>تصدير نسخة مشفّرة</button><button id="undo" disabled>استعادة اللقطة السابقة</button><button id="lock" hidden>قفل السجل</button><button id="install" hidden>تثبيت التطبيق</button><button id="update" hidden>تطبيق تحديث الموقع</button></div>
+      <p id="message" role="status" aria-live="polite"></p>
+    </section>
+    <section id="preview" class="panel preview" hidden aria-labelledby="preview-title"><h2 id="preview-title">معاينة — لم تُحفظ بعد</h2><p id="preview-text"></p><p>سيُستبدل عرض اللقطة فقط، وتُحفظ السابقة للاستعادة. مكتبتك القديمة وعدّادها لا يتغيران. لا تُرفع أي بيانات إلى الإنترنت.</p><button id="confirm">اعتماد اللقطة على هذا الجهاز</button><button id="cancel">إلغاء</button></section>
+    <section id="empty" class="panel empty"><span aria-hidden="true">◈</span><h2>سجلّك يبقى لك</h2><p>لا توجد بيانات تجريبية ولا أرقام مفترضة. اختر اللقطة المنقولة لعرض المكتبة والرتبة وتوزيع ساعاتك.</p><p>هذه المرحلة تعرض لقطة ثابتة. جلب الحسابات وتحديث الرتبة بعد لعب جديد لم يُربطا بعد.</p></section>
+    <div id="content" hidden>
+      <nav class="tabs" aria-label="أقسام السجل"><button data-tab="overview" aria-pressed="true">نظرة عامة</button><button data-tab="awards" aria-pressed="false">إنجاز</button><button data-tab="library" aria-pressed="false">الألعاب</button></nav>
+      <section id="overview">
+        <div id="headline" class="headline"></div>
+        <div id="metrics" class="metrics"></div>
+        <div class="grid"><section class="panel"><h2>الساعات ومصدر تاريخها</h2><div id="precision"></div><p>الساعات غير المؤرّخة تدخل الإجمالي والرتبة، ولا توزّع على أيام أو أشهر مفترضة.</p></section><section class="panel"><h2>من أين جاءت ساعاتك؟</h2><div id="sources"></div></section></div>
+        <div class="grid"><section class="panel"><h2>اللعب عبر السنوات</h2><div id="years"></div></section><section class="panel"><h2>أجهزتك</h2><div id="devices"></div></section></div>
+        <section class="panel"><h2>الأشهر المسجّلة</h2><label for="year-filter">السنة</label> <select id="year-filter"></select><div id="months"></div><p>يُعرض الشهر كما سجّله المصدر؛ لا يُنسب إجمالي مجهول التاريخ لأي شهر.</p></section>
+        <section class="panel"><h2>تقويم اللعب الموثّق باليوم</h2><div id="calendar" class="calendar"></div><p>كل مربع يوم له وقت معروف. افتح المربع لقراءة تاريخه وساعاته. الأشهر بلا أيام دقيقة لا تتحوّل إلى جلسات.</p></section>
+        <div class="grid"><section class="panel"><h2>الأكثر لعبًا</h2><div id="top"></div></section><section class="panel"><h2>عادتك في اللعب</h2><div id="habits"></div><h3>أيام الأسبوع</h3><div id="weekdays"></div></section></div>
+      </section>
+      <section id="awards" hidden><h2>إنجاز — نفس الرصيد، نفس الاستحقاق</h2><p>هذه نتائج محرّك YasirXcenter عند التصدير، وليست تحويلًا لنقاط «المِران» في المكتبة القديمة. التختيم يدوي، وجوائز المنصّات لا تدفع نقاطًا.</p><div class="grid"><section class="panel"><h3>عائلات الإنجاز</h3><div id="families"></div></section><section class="panel"><h3>الخامات</h3><div id="materials"></div></section></div><label for="award-search">ابحث في الإنجازات</label><input id="award-search" type="search" placeholder="اسم اللعبة أو الإنجاز"><label for="family-filter">العائلة</label><select id="family-filter"></select><p id="award-count"></p><div id="award-list" class="award-grid"></div><button id="more-awards" hidden>عرض المزيد</button></section>
+      <section id="library" hidden><h2>مكتبة اللقطة</h2><p>للقراءة فقط؛ استيراد لقطة أحدث لا يحذف شيئًا من مكتبتك القديمة.</p><label for="game-search">ابحث باسم اللعبة</label><input id="game-search" type="search" placeholder="ابحث هنا…"><label for="platform-filter">المنصة</label><select id="platform-filter"></select><p id="game-count"></p><div class="table-wrap"><table><thead><tr><th scope="col">اللعبة</th><th scope="col">المنصة</th><th scope="col">الساعات</th><th scope="col">تختيمات</th><th scope="col">آخر لعب</th></tr></thead><tbody id="game-list"></tbody></table></div><button id="more-games" hidden>عرض المزيد</button></section>
+    </div>
+    <footer><p>لا اتصال بخادم YasirXcenter • لا مفاتيح حسابات • لا تتبّع</p><p>حذف بيانات المتصفح يزيل اللقطة المحلية؛ احتفظ بنسخة مشفّرة. الجلب المباشر من الشبكات ليس مفعّلًا في هذه النسخة. حماية كلمة المرور تخص سجل اللقطة؛ بيانات المكتبة القديمة المحلية منفصلة.</p><p>من ينزّل الملف المشفّر يمكنه محاولة تخمين كلمة المرور خارج الموقع. تغييرها لا يلغي النسخ القديمة؛ استخدم عبارة قوية لا تستخدمها في حساباتك.</p><a href="index.html">العودة إلى المكتبة القديمة</a></footer>
+  </main>
+</body>
+</html>

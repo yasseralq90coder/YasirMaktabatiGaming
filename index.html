@@ -6,7 +6,7 @@
 <title>مكتبتي الجيمرية</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
 <meta name="theme-color" content="#0b0d17">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -24,6 +24,7 @@
 
 </head>
 <body>
+<aside style="padding:10px 18px;background:#19352e;color:#e9f2ee;text-align:center;font-family:Tahoma,Arial,sans-serif"><a href="records.html" style="color:#9eefb3">افتح سجل «إنجاز» والإحصائيات المنقولة</a> — لقطة مستقلة؛ المكتبة القديمة أدناه لم تتغير.</aside>
 <div id="root"></div>
 <script>
 const {
@@ -1947,8 +1948,8 @@ function seasonMiran(games, start, end) {
   }
   return Math.round(xp);
 }
-function seasonInfo(games) {
-  const now = new Date(), q = Math.floor(now.getMonth() / 3), y = now.getFullYear();
+function seasonInfo(games, now = new Date()) {
+  const q = Math.floor(now.getMonth() / 3), y = now.getFullYear();
   const start = new Date(y, q * 3, 1), end = new Date(y, q * 3 + 3, 1);
   const pool = SEASON_CHARS.filter(([re]) => (games || []).some(g => re.test(g.name)));
   const list = pool.length ? pool : SEASON_CHARS;

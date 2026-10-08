@@ -7,13 +7,22 @@
 
 /* ⚠️ ارفع هذا الرقم مع أي تغيير في الملفات المخزَّنة، وإلا بقي المستخدم على
    نسخة قديمة: قاعدة activate تحذف كل كاش اسمه مختلف، فبلا تغيير الاسم لا يُحذف شيء. */
-const CACHE_VERSION = "v23";
-const CACHE_NAME = "gamelib-" + CACHE_VERSION;
+const CACHE_VERSION = "v25";
+// GitHub Pages repositories share an origin. Never delete another app's cache.
+const CACHE_PREFIX = "gamelib-" + self.registration.scope + "-";
+const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 const SHELL_FILES = [
   "./",
   "./index.html",
+  "./records.html",
+  "./records.css",
+  "./records-core.js",
+  "./records-crypto.js",
+  "./records.js",
   "./manifest.json",
   "./icon.svg",
+  "./icon-192.png",
+  "./icon-512.png",
   "./games_db.js",
   /* React محلي لا من CDN: أول تشغيل بلا شبكة كان يعطي شاشة سوداء —
      يفشل تحميل React فيفشل كل السكربت بلا أثر مرئي. */
@@ -27,7 +36,7 @@ self.addEventListener("install", event => {
      تنتظر النسخة، ويظهر بانر، والتفعيل برسالة skip-waiting من الصفحة. */
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache =>
-      Promise.all(SHELL_FILES.map(url => cache.add(url).catch(() => {})))
+      cache.addAll(SHELL_FILES)
     )
   );
 });
@@ -35,7 +44,7 @@ self.addEventListener("install", event => {
 self.addEventListener("activate", event => {
   event.waitUntil(
     Promise.all([
-      caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))),
+      caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME).map(k => caches.delete(k)))),
       self.clients.claim(),
       rearmFromIDB()   /* SW جديد بعد تحديث: استعد أي عدّاد شغّال */
     ])
@@ -51,16 +60,21 @@ self.addEventListener("fetch", event => {
   rearmFromIDB();
   const url = new URL(req.url);
   const isAppShell = url.origin === self.location.origin;
+  // Provider requests, authorization headers and arbitrary/private JSON never
+  // enter Cache Storage. Only the explicitly listed public shell is cacheable.
+  const shellUrls = SHELL_FILES.map(file => new URL(file, self.registration.scope).href);
+  if (!isAppShell || req.headers.has("Authorization") || url.search || !shellUrls.includes(url.href)) return;
 
-  if (isAppShell && (url.pathname.endsWith("/") || url.pathname.endsWith("index.html"))) {
+  if (url.pathname.endsWith("/") || url.pathname.endsWith(".html")) {
     /* ⚠️ cache:"no-cache" ضروري لا تجميلي: GitHub Pages يرسل max-age، فـfetch
        العادي يُخدَم من كاش المتصفح نفسه قبل أن يصل الطلب للخادم — فيبقى المستخدم
        على HTML قديم رغم أن "الشبكة أولًا" تبدو صحيحة. هذا يفرض إعادة التحقّق. */
     event.respondWith(
       fetch(new Request(req.url, { cache: "no-cache", credentials: "same-origin" })).then(res => {
+        if (!res.ok) throw new Error("Shell unavailable");
         caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
         return res;
-      }).catch(() => caches.match(req).then(r => r || caches.match("./index.html")))
+      }).catch(() => caches.match(req).then(r => r || Response.error()))
     );
     return;
   }
@@ -68,7 +82,7 @@ self.addEventListener("fetch", event => {
     caches.match(req).then(cached => cached || fetch(req).then(res => {
       if (res && res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
       return res;
-    }).catch(() => cached))
+    }).catch(() => Response.error()))
   );
 });
 

@@ -68,7 +68,8 @@ eq(C.miranOfGame(game({ hours: "abc" })), 0, "الساعات النصّية تُ
     C.miranGames(gs) + C.earnedTitles(gs).length * 1000 + C.challengeMiran(gs) + C.streakMiran(gs),
     "مجموع بنود المِران = الرصيد المعروض (لا فارق غير مفسَّر)");
   /* ⚠️ مسار الموسم عرضٌ لا رصيد: إضافته كانت ستدفع مرّتين عن الساعة الواحدة */
-  const sn = C.seasonInfo(gs);
+  // Fixed clock: August's fixture must not fail when CI moves into October.
+  const sn = C.seasonInfo(gs, new Date("2026-08-15T12:00:00"));
   ok(sn.xp > 0, "مسار الموسم يقيس نشاط الربع");
   ok(C.miranTotal(gs) < C.miranGames(gs) + C.earnedTitles(gs).length * 1000
      + C.challengeMiran(gs) + C.streakMiran(gs) + sn.xp,
