@@ -62,6 +62,10 @@ jobs:
         with: { distribution: temurin, java-version: '17' }
 
       - uses: android-actions/setup-android@v3
+        # Google removed the legacy 'tools' package; command-line tools are
+        # already installed by the action. Avoid its obsolete v3 default.
+        with:
+          packages: 'platform-tools'
 
       # ⚠️ بلا هذا السرّ يُوقَّع الـAPK بمفتاح تصحيح عشوائي لكل بناء،
       # فيرفض أندرويد تحديثه ويُجبر المستخدم على الحذف وفقدان بياناته.
